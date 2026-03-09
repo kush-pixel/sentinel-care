@@ -1,0 +1,28 @@
+{
+  "name": "@sentinel/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clinician-facing Next.js dashboard for monitoring triage outcomes and care plans",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf .next dist"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "@sentinel/schemas": "*",
+    "@sentinel/types": "*",
+    "next": "^15.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "*"
+  }
+}

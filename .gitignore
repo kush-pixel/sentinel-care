@@ -1,0 +1,49 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+!jest.config.js
+!*.config.js
+
+# TypeScript
+*.tsbuildinfo
+
+# CDK / Infrastructure
+cdk.out/
+cdk.context.json
+
+# AWS SAM
+.aws-sam/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+.env
+.env.*
+!.env.example

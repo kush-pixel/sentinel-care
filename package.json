@@ -1,0 +1,27 @@
+{
+  "name": "sentinel-voice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-agent post-discharge patient triage system powered by AWS and voice AI",
+  "workspaces": [
+    "packages/*",
+    "shared/*",
+    "infrastructure",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
+    "deploy": "npm run deploy --workspace=infrastructure"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
