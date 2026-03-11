@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist",
-    "test": "jest --coverage"
+    "test": "jest --coverage",
+    "test:local": "ts-node --project tsconfig.json src/local-test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.490.0",
