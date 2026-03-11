@@ -47,3 +47,7 @@ coverage/
 .env
 .env.*
 !.env.example
+# Claude Code files
+.claude/
+CLAUDE.md
+.claude.json

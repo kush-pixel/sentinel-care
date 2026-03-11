@@ -65,6 +65,30 @@ export const PatientAnswers = z.object({
 
 export type PatientAnswers = z.infer<typeof PatientAnswers>;
 
+// ─── LaceComponents ───────────────────────────────────────────────────────────
+
+export const LaceComponentsSchema = z.object({
+  L: z.number().min(0).max(7),
+  A: z.number().min(0).max(3),
+  C: z.number().min(0).max(5),
+  E: z.number().min(0).max(4),
+});
+
+export type LaceComponents = z.infer<typeof LaceComponentsSchema>;
+
+// ─── LaceResult ───────────────────────────────────────────────────────────────
+
+export const LaceResultSchema = z.object({
+  totalScore: z.number().min(0).max(19),
+  riskLevel: z.enum(["LOW", "MODERATE", "HIGH", "VERY HIGH"]),
+  components: LaceComponentsSchema,
+  lengthOfStayDays: z.number().min(0),
+  charlsonScore: z.number().min(0),
+  interpretation: z.string(),
+});
+
+export type LaceResult = z.infer<typeof LaceResultSchema>;
+
 // ─── DashboardPayload ─────────────────────────────────────────────────────────
 
 export const DashboardPayload = z.object({
@@ -88,6 +112,7 @@ export const DashboardPayload = z.object({
     "ai_generated",
     "none",
   ]).optional(),
+  lace_result: LaceResultSchema.optional(),
 });
 
 export type DashboardPayload = z.infer<typeof DashboardPayload>;
@@ -149,6 +174,7 @@ export const ProtocolReviewSchema = z.object({
   review_notes: z.string().nullable(),
   created_at: z.string(),
   approved_at: z.string().nullable(),
+  lace_result: LaceResultSchema.optional(),
 });
 
 export type ProtocolReview = z.infer<typeof ProtocolReviewSchema>;

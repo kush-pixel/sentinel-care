@@ -4,6 +4,7 @@ import {
   DashboardPayload,
   ClinicalRuleSchema,
   ProtocolReviewSchema,
+  LaceResultSchema,
 } from "../index.js";
 import { safeParseProtocol } from "../validate.js";
 
@@ -229,5 +230,35 @@ test("ProtocolReviewSchema rejects invalid status value", () => {
   };
 
   const result = ProtocolReviewSchema.safeParse(input);
+  expect(result.success).toBe(false);
+});
+
+// ─── Test 10: LaceResultSchema valid HIGH ─────────────────────────────────────
+
+test("LaceResultSchema accepts a valid HIGH result", () => {
+  const input = {
+    totalScore: 10,
+    riskLevel: "HIGH",
+    components: { L: 4, A: 3, C: 1, E: 2 },
+    lengthOfStayDays: 6,
+    charlsonScore: 1,
+    interpretation: "LACE score 10: HIGH readmission risk.",
+  };
+  const result = LaceResultSchema.safeParse(input);
+  expect(result.success).toBe(true);
+});
+
+// ─── Test 11: LaceResultSchema rejects score above 19 ────────────────────────
+
+test("LaceResultSchema rejects totalScore above 19", () => {
+  const input = {
+    totalScore: 20,
+    riskLevel: "VERY HIGH",
+    components: { L: 7, A: 3, C: 5, E: 4 },
+    lengthOfStayDays: 14,
+    charlsonScore: 5,
+    interpretation: "test",
+  };
+  const result = LaceResultSchema.safeParse(input);
   expect(result.success).toBe(false);
 });

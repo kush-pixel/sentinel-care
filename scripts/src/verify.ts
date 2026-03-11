@@ -6,8 +6,9 @@ import {
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
-import { getFullPatientRecord } from "./fhir/fhir-client";
+import { getFullPatientRecord, getEncounters } from "./fhir/fhir-client";
 import { getRulesForCondition } from "./rules/clinical-rules-client";
+import { calculateLaceScore } from "@sentinel/lace";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
@@ -211,6 +212,67 @@ async function checkRulesClient(): Promise<{
   }
 }
 
+// ─── Check 10: FHIR encounters ───────────────────────────────────────────────
+
+async function checkFhirEncounters(): Promise<number> {
+  let found = 0;
+  for (const pid of PATIENT_IDS) {
+    try {
+      const res = await fetch(`${fhirBase()}/Encounter?patient=${pid}`);
+      if (res.ok) {
+        const bundle = (await res.json()) as { entry?: unknown[] };
+        if ((bundle.entry ?? []).length > 0) found++;
+      }
+    } catch {
+      // skip
+    }
+  }
+  return found;
+}
+
+// ─── Check 11: LACE calculator smoke test ────────────────────────────────────
+
+function checkLaceCalculator(): { ok: boolean; message: string } {
+  try {
+    const result = calculateLaceScore({
+      admissionDate: "2026-02-28",
+      dischargeDate: "2026-03-06",
+      admissionType: "EMERGENCY",
+      conditionCodes: ["I50.9"],
+      recentEDVisits: 2,
+    });
+    // 6 days LOS → L=4, EMERGENCY → A=3, I50.9 charlson=1 → C=1, 2 ED → E=2 → total=10
+    if (result.totalScore === 10 && result.riskLevel === "HIGH") {
+      return { ok: true, message: "WORKING" };
+    }
+    return {
+      ok: false,
+      message: `ERROR — expected score=10 HIGH, got score=${result.totalScore} ${result.riskLevel}`,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: `ERROR — ${msg}` };
+  }
+}
+
+// ─── Check 12: getEncounters client smoke test ────────────────────────────────
+
+async function checkGetEncounters(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const encounters = await getEncounters("P001");
+    if (encounters.length >= 3) {
+      return { ok: true, message: "WORKING" };
+    }
+    return {
+      ok: false,
+      message: `ERROR — expected ≥3 encounters for P001, got ${encounters.length}`,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: `ERROR — ${msg}` };
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -228,6 +290,8 @@ async function main(): Promise<void> {
     reviewsResult,
     fhirClientResult,
     rulesClientResult,
+    encounterCount,
+    getEncountersResult,
   ] = await Promise.all([
     checkFhirPatients(),
     checkFhirConditions(),
@@ -238,7 +302,11 @@ async function main(): Promise<void> {
     checkProtocolReviews(client),
     checkFhirClient(),
     checkRulesClient(),
+    checkFhirEncounters(),
+    checkGetEncounters(),
   ]);
+
+  const laceResult = checkLaceCalculator();
 
   const dist = resultsResult.distribution;
 
@@ -262,7 +330,10 @@ async function main(): Promise<void> {
     reviewsResult.autoApproved === 1 &&
     reviewsResult.pending === 1 &&
     fhirClientResult.ok &&
-    rulesClientResult.ok;
+    rulesClientResult.ok &&
+    encounterCount === 6 &&
+    laceResult.ok &&
+    getEncountersResult.ok;
 
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -284,6 +355,9 @@ async function main(): Promise<void> {
   );
   console.log(`FHIR client:             ${fhirClientResult.message}`);
   console.log(`Rules client:            ${rulesClientResult.message}`);
+  console.log(`FHIR encounters:         ${encounterCount}/6`);
+  console.log(`LACE calculator:         ${laceResult.message}`);
+  console.log(`getEncounters client:    ${getEncountersResult.message}`);
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   );

@@ -1,0 +1,25 @@
+{
+  "name": "@sentinel/lace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LACE readmission risk score calculator",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "jest --coverage",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "*",
+    "@types/node": "*",
+    "jest": "*",
+    "ts-jest": "*",
+    "typescript": "*"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.tsx?$": ["ts-jest", { "tsconfig": { "module": "CommonJS", "moduleResolution": "Node" } }]
+    }
+  }
+}
