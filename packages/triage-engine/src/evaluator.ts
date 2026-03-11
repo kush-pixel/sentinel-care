@@ -1,5 +1,10 @@
 import type { ConditionNode, RuleNode, TriageProtocol, PatientAnswers } from "@sentinel/schemas";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/** Minimum answer confidence to treat a variable as present. */
+const CONFIDENCE_THRESHOLD = 0.7;
+
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface ConditionResult {
@@ -9,7 +14,7 @@ export interface ConditionResult {
   operator: ConditionNode["operator"];
   /** Threshold from the protocol */
   threshold: number | boolean | string;
-  /** Patient's actual reported value, undefined if variable was not answered */
+  /** Patient's actual reported value, undefined if variable was absent or low-confidence */
   actualValue: number | boolean | string | undefined;
   /** Weight contribution of this condition (0 if weight not set) */
   weight: number;
@@ -29,7 +34,7 @@ export interface NodeResult {
 export interface TriageResult {
   /** Final triage colour, or INCOMPLETE when call data is insufficient */
   flagColor: "GREEN" | "YELLOW" | "RED" | "INCOMPLETE";
-  /** Variable names whose conditions triggered a non-GREEN outcome */
+  /** Formatted broken-rule strings, e.g. "weight_gain_lbs >= 3" */
   brokenRules: string[];
   /** Weighted score from root_node evaluation; undefined when no weights are set */
   weightedScore: number | undefined;
@@ -37,23 +42,26 @@ export interface TriageResult {
   nodeResult: NodeResult;
   /** True when the call was incomplete or required variables were unanswered */
   isIncomplete: boolean;
+  /** Human-readable reason when isIncomplete is true */
+  incompleteReason?: string;
 }
 
 // ─── evaluateCondition ────────────────────────────────────────────────────────
 
 /**
  * Compares a single extracted variable value against a protocol condition.
- * Returns `passed: false` when the variable is absent from the answers map.
+ * Returns `passed: false` (with actualValue undefined) when the variable is
+ * absent from the answers map or has confidence below CONFIDENCE_THRESHOLD.
  */
 export function evaluateCondition(
   condition: ConditionNode,
   variables: PatientAnswers["variables"]
 ): ConditionResult {
   const entry = variables[condition.variable];
-  const actualValue = entry?.value;
   const weight = condition.weight ?? 0;
 
-  if (actualValue === undefined) {
+  // Skip absent variables and low-confidence answers
+  if (entry === undefined || entry.confidence < CONFIDENCE_THRESHOLD) {
     return {
       variable: condition.variable,
       operator: condition.operator,
@@ -64,6 +72,7 @@ export function evaluateCondition(
     };
   }
 
+  const actualValue = entry.value;
   let passed = false;
 
   // Numeric comparisons
@@ -134,27 +143,25 @@ export function evaluateNode(
 /**
  * Evaluates a full TriageProtocol against a set of PatientAnswers.
  *
- * - Returns INCOMPLETE when the call did not complete or required variables
- *   listed in `unresolved_variables` are missing.
- * - Returns the protocol's `flag_color` when the root_node passes.
- * - Returns GREEN when the root_node does not pass.
+ * Completeness is checked in two stages:
+ *   1. Hard stop — call_status INCOMPLETE or unresolved_variables present.
+ *   2. LACE skip threshold — when laceRiskLevel is supplied, the fraction of
+ *      unanswered question_priority variables is checked against a risk-adjusted
+ *      threshold (HIGH: 30 %, MODERATE: 40 %, LOW/other: 50 %).
  *
- * @param laceRiskLevel  Optional LACE risk level string — reserved for future
- *                       severity adjustment; not currently applied to flag_color.
+ * Returns the protocol's `flag_color` when the root_node passes, GREEN otherwise.
  */
 export function evaluateProtocol(
   protocol: TriageProtocol,
   answers: PatientAnswers,
   laceRiskLevel?: string
 ): TriageResult {
-  void laceRiskLevel; // reserved parameter — suppresses noUnusedParameters
-
-  // ── Completeness check ───────────────────────────────────────────────────
-  const isIncomplete =
+  // ── Stage 1: hard completeness stop ─────────────────────────────────────
+  const isHardIncomplete =
     answers.call_status === "INCOMPLETE" ||
     answers.unresolved_variables.length > 0;
 
-  if (isIncomplete) {
+  if (isHardIncomplete) {
     const nodeResult = evaluateNode(protocol.root_node, answers.variables);
     return {
       flagColor: "INCOMPLETE",
@@ -162,7 +169,34 @@ export function evaluateProtocol(
       weightedScore: nodeResult.weightedScore,
       nodeResult,
       isIncomplete: true,
+      incompleteReason: "Call did not complete",
     };
+  }
+
+  // ── Stage 2: LACE-adjusted skip threshold ───────────────────────────────
+  if (laceRiskLevel !== undefined) {
+    const skipThreshold =
+      laceRiskLevel === "HIGH"     ? 0.30 :
+      laceRiskLevel === "MODERATE" ? 0.40 :
+      0.50; // LOW or unrecognised
+
+    const questionCount = protocol.question_priority.length;
+    const skippedCount = protocol.question_priority.filter((v) => {
+      const entry = answers.variables[v];
+      return entry === undefined || entry.confidence < CONFIDENCE_THRESHOLD;
+    }).length;
+
+    if (questionCount > 0 && skippedCount / questionCount > skipThreshold) {
+      const nodeResult = evaluateNode(protocol.root_node, answers.variables);
+      return {
+        flagColor: "INCOMPLETE",
+        brokenRules: [],
+        weightedScore: nodeResult.weightedScore,
+        nodeResult,
+        isIncomplete: true,
+        incompleteReason: `${skippedCount}/${questionCount} required variables were not answered`,
+      };
+    }
   }
 
   // ── Evaluate root node ───────────────────────────────────────────────────
@@ -175,7 +209,7 @@ export function evaluateProtocol(
   const brokenRules: string[] = nodeResult.passed
     ? nodeResult.conditionResults
         .filter((r) => r.passed)
-        .map((r) => r.variable)
+        .map((r) => `${r.variable} ${r.operator} ${r.threshold}`)
     : [];
 
   return {
