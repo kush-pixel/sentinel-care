@@ -1,5 +1,5 @@
 {
-  "name": "@sentinel/care-planner",
+  "name": "@sentinel/care-planner-stub",
   "version": "0.1.0",
   "private": true,
   "description": "Lambda agent that generates personalised post-discharge care plans via Bedrock",
