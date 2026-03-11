@@ -1,0 +1,52 @@
+{
+  "name": "@sentinel/care-planner",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "jest --coverage",
+    "test:local": "ts-node -r tsconfig-paths/register src/local-test.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.490.0",
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/client-polly": "^3.490.0",
+    "@aws-sdk/client-s3": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "@aws-sdk/util-dynamodb": "^3.490.0",
+    "@sentinel/lace": "*",
+    "@sentinel/schemas": "*",
+    "dotenv": "^16.4.1",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "*",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "*"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/src"],
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "CommonJS",
+            "moduleResolution": "Node"
+          }
+        }
+      ]
+    },
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1",
+      "^@sentinel/schemas$": "<rootDir>/../../shared/schemas/src/index.ts",
+      "^@sentinel/lace$": "<rootDir>/../../shared/lace/src/index.ts"
+    }
+  }
+}

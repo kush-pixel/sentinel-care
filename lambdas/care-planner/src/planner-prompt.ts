@@ -1,0 +1,174 @@
+// Pure string construction — zero AWS imports, zero AI calls.
+
+import { type ClinicalRule, type LaceResult } from "@sentinel/schemas";
+import { type FhirFullRecord } from "../../../scripts/src/fhir/fhir-client";
+
+export interface PlannerPromptInput {
+  patient: FhirFullRecord;
+  rules: ClinicalRule[];
+  targetLanguage: string;
+  laceResult: LaceResult;
+}
+
+function calculateAge(birthDate: string): number {
+  const birth = new Date(birthDate);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+export function buildCarePlannerPrompt(input: PlannerPromptInput): string {
+  const { patient: record, rules, targetLanguage, laceResult } = input;
+  const p = record.patient;
+
+  const patientId = p.id;
+  const age = p.birthDate ? calculateAge(p.birthDate) : "Unknown";
+  const gender = p.gender ?? "Unknown";
+  const dischargeDate =
+    p.extension?.find((e) => e.url === "discharge-date")?.valueDate ?? "Unknown";
+  const attendingPhysician =
+    p.extension?.find((e) => e.url === "attending-physician")?.valueString ?? "Unknown";
+
+  const conditionsList = record.conditions
+    .map((c) => {
+      const coding = c.code.coding[0];
+      return `  - ${coding?.code ?? "?"}: ${coding?.display ?? "Unknown condition"}`;
+    })
+    .join("\n");
+
+  const medicationsList = record.medications
+    .map((m) => {
+      const coding = m.medicationCodeableConcept.coding[0];
+      return `  - ${coding?.code ?? "?"}: ${coding?.display ?? "Unknown medication"}`;
+    })
+    .join("\n");
+
+  const rulesJson = rules
+    .map((r) => JSON.stringify(r, null, 2))
+    .join("\n\n");
+
+  // ─── Section A — Role and hard constraints ─────────────────────────────────
+
+  const sectionA = `You are a clinical care planner AI for a post-discharge triage system. Generate a personalised triage protocol for the patient below.
+
+HARD RULES — NEVER VIOLATE THESE:
+1. Use ONLY threshold values from the VALIDATED CLINICAL RULES section below. Never invent thresholds.
+2. Any threshold not present in the rules is FORBIDDEN.
+3. You may ONLY personalise:
+   - question_priority order (most urgent first)
+   - condition weights (adjust for this patient's risk)
+   - preferred_language
+   - flag_color (based on highest risk in rules)
+4. Output ONLY valid JSON. No preamble. No explanation. No markdown. No backticks. Raw JSON only.`;
+
+  // ─── Section B — Language ──────────────────────────────────────────────────
+
+  const sectionB =
+    targetLanguage === "es"
+      ? "Set preferred_language to 'es'. Patient speaks Spanish."
+      : "Set preferred_language to 'en'.";
+
+  // ─── Section C — Patient clinical summary ──────────────────────────────────
+
+  const sectionC = `PATIENT CLINICAL SUMMARY:
+Patient ID: ${patientId}
+Age: ${age}
+Gender: ${gender}
+Discharge Date: ${dischargeDate}
+Attending Physician: ${attendingPhysician}
+
+LACE READMISSION RISK SCORE: ${laceResult.totalScore} (${laceResult.riskLevel})
+${laceResult.interpretation}
+Components: L=${laceResult.components.L} A=${laceResult.components.A} C=${laceResult.components.C} E=${laceResult.components.E}
+
+Active Conditions:
+${conditionsList}
+
+Current Medications:
+${medicationsList}`;
+
+  // ─── Section D — Validated clinical rules ──────────────────────────────────
+
+  const sectionD = rules.length > 0
+    ? `VALIDATED CLINICAL RULES — USE THESE EXACT THRESHOLDS:
+
+${rulesJson}
+
+DO NOT use any threshold not listed above.`
+    : `VALIDATED CLINICAL RULES: None found for this patient's conditions.
+You must generate safe, general post-discharge thresholds.
+Use only boolean (true/false) thresholds and numeric values in standard clinical ranges.`;
+
+  // ─── Section E — Required output schema ────────────────────────────────────
+
+  const sectionE = `Generate a JSON object matching exactly this structure:
+{
+  "patient_id": "<string>",
+  "preferred_language": "<string>",
+  "flag_color": "<GREEN | YELLOW | RED>",
+  "question_priority": ["<variable1>", "<variable2>", ...],
+  "root_node": {
+    "logic": "<AND | OR>",
+    "conditions": [
+      {
+        "variable": "<string>",
+        "operator": "<>= | <= | == | > | <>",
+        "threshold": "<number or boolean>",
+        "weight": "<number 0.0–1.0>"
+      }
+    ],
+    "weighted_threshold": "<number 0.0–1.0>"
+  }
+}`;
+
+  // ─── Section F — Example output ────────────────────────────────────────────
+
+  const sectionF = `EXAMPLE OUTPUT (CHF patient — shows the correct JSON structure):
+{
+  "patient_id": "P001",
+  "preferred_language": "en",
+  "flag_color": "RED",
+  "question_priority": ["weight_gain_lbs", "shortness_of_breath", "lasix_filled", "ankle_swelling"],
+  "root_node": {
+    "logic": "OR",
+    "conditions": [
+      { "variable": "weight_gain_lbs", "operator": ">=", "threshold": 3, "weight": 0.9 },
+      { "variable": "shortness_of_breath", "operator": "==", "threshold": true, "weight": 0.85 },
+      { "variable": "lasix_filled", "operator": "==", "threshold": false, "weight": 0.8 },
+      { "variable": "ankle_swelling", "operator": "==", "threshold": true, "weight": 0.7 }
+    ],
+    "weighted_threshold": 0.75
+  }
+}`;
+
+  // ─── Section G — LACE personalisation ─────────────────────────────────────
+
+  let laceInstruction: string;
+  if (laceResult.riskLevel === "HIGH" || laceResult.riskLevel === "VERY HIGH") {
+    laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
+Prioritise the most critical safety questions first.
+Set flag_color to RED.
+Weight acute symptom variables above 0.8.`;
+  } else if (laceResult.riskLevel === "MODERATE") {
+    laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
+Balance urgency with routine follow-up questions.
+Set flag_color to YELLOW.`;
+  } else {
+    laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
+Standard follow-up protocol is appropriate.
+Set flag_color to GREEN unless a rule triggers RED.`;
+  }
+  const sectionG = `${laceInstruction}
+Remember: use only the threshold values provided above.`;
+
+  // ─── Section H — Final instruction ────────────────────────────────────────
+
+  const sectionH = `Now generate the triage protocol for patient ${patientId}. Output ONLY the JSON object. Nothing else.`;
+
+  // ─── Assemble prompt ───────────────────────────────────────────────────────
+
+  return [sectionA, sectionB, sectionC, sectionD, sectionE, sectionF, sectionG, sectionH]
+    .join("\n\n");
+}
