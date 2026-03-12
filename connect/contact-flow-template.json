@@ -1,0 +1,71 @@
+{
+  "description": "Sentinel Voice post-discharge follow-up",
+  "version": "2019-10-30",
+  "blocks": [
+    {
+      "id": "1",
+      "type": "PlayPrompt",
+      "description": "Play greeting",
+      "text": "Hello, this is Sentinel Care calling for your post-discharge follow-up. This call will take approximately 3 minutes."
+    },
+    {
+      "id": "2",
+      "type": "InvokeLambda",
+      "description": "Get protocol question list",
+      "lambdaArn": "LAMBDA_ARN_CARE_PLANNER",
+      "parameters": { "action": "getQuestions" }
+    },
+    {
+      "id": "3",
+      "type": "Loop",
+      "description": "For each question in priority order",
+      "steps": [
+        {
+          "type": "PlayAudioFromS3",
+          "description": "Play pre-generated question audio",
+          "s3KeyAttribute": "currentQuestionAudioKey"
+        },
+        {
+          "type": "RecordSpeech",
+          "description": "Record patient response",
+          "maxSeconds": 15,
+          "silenceTimeout": 3
+        },
+        {
+          "type": "InvokeLambda",
+          "description": "Extract and save answer",
+          "lambdaArn": "LAMBDA_ARN_EXTRACT",
+          "parameters": {
+            "transcript": "$.transcript",
+            "questionVariable": "$.currentVariable",
+            "expectedType": "$.currentExpectedType"
+          }
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "type": "PlayPrompt",
+      "description": "Play closing message",
+      "text": "Thank you. Your responses have been recorded and a nurse will review them shortly. If you have an emergency please call 911. Goodbye."
+    },
+    {
+      "id": "5",
+      "type": "InvokeLambda",
+      "description": "Finalise call",
+      "lambdaArn": "LAMBDA_ARN_COMPLETE",
+      "parameters": {
+        "callStatus": "COMPLETE"
+      }
+    },
+    {
+      "id": "6",
+      "type": "Disconnect"
+    }
+  ],
+  "spanishVariant": {
+    "description": "Same flow with Spanish audio files",
+    "condition": "preferred_language == es",
+    "audioPrefix": "audio/es/"
+  }
+}

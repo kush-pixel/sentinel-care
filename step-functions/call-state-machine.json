@@ -1,0 +1,54 @@
+{
+  "Comment": "Sentinel Voice call orchestration state machine",
+  "StartAt": "InitiateCall",
+  "States": {
+    "InitiateCall": {
+      "Type": "Task",
+      "Resource": "LAMBDA_ARN_CALL_INITIATOR",
+      "ResultPath": "$.callResult",
+      "Next": "WaitForCallCompletion",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleCallFailure",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "WaitForCallCompletion": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "FinaliseCall"
+    },
+    "FinaliseCall": {
+      "Type": "Task",
+      "Resource": "LAMBDA_ARN_CALL_COMPLETE",
+      "ResultPath": "$.finalResult",
+      "Next": "CallSucceeded",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleCallFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "HandleCallFailure": {
+      "Type": "Task",
+      "Resource": "LAMBDA_ARN_INCOMPLETE",
+      "ResultPath": "$.failureResult",
+      "Next": "CallSucceeded"
+    },
+    "CallSucceeded": {
+      "Type": "Succeed"
+    }
+  }
+}
