@@ -8,14 +8,16 @@
     "shared/*",
     "lambdas/*",
     "infrastructure",
-    "scripts"
+    "scripts",
+    "dashboard"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
-    "deploy": "npm run deploy --workspace=infrastructure"
+    "deploy": "npm run deploy --workspace=infrastructure",
+    "dashboard": "npm run dev --workspace=dashboard"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

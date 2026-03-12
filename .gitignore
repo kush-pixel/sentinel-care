@@ -53,3 +53,6 @@ CLAUDE.md
 .claude.json
 
 lambdas/logs/
+
+dashboard/.next/
+dashboard/node_modules/

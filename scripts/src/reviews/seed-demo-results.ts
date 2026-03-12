@@ -19,9 +19,17 @@ function table(): string {
   return process.env["DYNAMO_TABLE_RESULTS"] ?? "CallResults";
 }
 
-// ─── Extended record type (DashboardPayload + call_timestamp) ─────────────────
+// ─── Extended record type ──────────────────────────────────────────────────────
+// DashboardPayload + call_timestamp + patient answer variables (needed by
+// the triage engine evaluator which reads variables from CallResults).
 
-type CallResultRecord = DashboardPayload & { call_timestamp: string };
+type ExtractedVariable = { value: number | boolean | string; confidence: number };
+
+type CallResultRecord = DashboardPayload & {
+  call_timestamp: string;
+  variables: Record<string, ExtractedVariable>;
+  unresolved_variables: string[];
+};
 
 // ─── Demo records ─────────────────────────────────────────────────────────────
 
@@ -43,6 +51,16 @@ const records: CallResultRecord[] = [
     protocol_source: "validated_library",
     condition_code: "I50.9",
     call_timestamp: "2026-03-08T14:23:00Z",
+    // weight_gain_lbs >= 3 (w=0.9) + lasix_filled == false (w=0.8) → score 1.7 >= threshold 0.75 → RED
+    variables: {
+      weight_gain_lbs:      { value: 4,     confidence: 0.95 },
+      shortness_of_breath:  { value: false,  confidence: 0.90 },
+      lasix_filled:         { value: false,  confidence: 0.95 },
+      ankle_swelling:       { value: false,  confidence: 0.90 },
+      appetite:             { value: true,   confidence: 0.90 },
+      mobility:             { value: true,   confidence: 0.90 },
+    },
+    unresolved_variables: [],
   },
   {
     call_id: "C002",
@@ -61,6 +79,15 @@ const records: CallResultRecord[] = [
     protocol_source: "validated_library",
     condition_code: "Z96.651",
     call_timestamp: "2026-03-08T14:45:00Z",
+    // pain_level >= 7 (w=0.7) → score 0.7 >= threshold 0.7 → YELLOW
+    variables: {
+      pain_level:           { value: 8,     confidence: 0.95 },
+      fever:                { value: 98.6,  confidence: 0.90 },
+      wound_drainage:       { value: false,  confidence: 0.90 },
+      mobility:             { value: true,   confidence: 0.90 },
+      medication_adherence: { value: true,   confidence: 0.90 },
+    },
+    unresolved_variables: [],
   },
   {
     call_id: "C003",
@@ -79,6 +106,16 @@ const records: CallResultRecord[] = [
     protocol_source: "validated_library",
     condition_code: "E11.9",
     call_timestamp: "2026-03-08T15:00:00Z",
+    // no conditions trigger → score 0 < threshold 0.7 → GREEN
+    variables: {
+      blood_sugar_level:    { value: 150,   confidence: 0.90 },
+      medication_adherence: { value: true,   confidence: 0.90 },
+      dizziness:            { value: false,  confidence: 0.90 },
+      fever:                { value: 98.6,  confidence: 0.90 },
+      appetite:             { value: true,   confidence: 0.90 },
+      mobility:             { value: true,   confidence: 0.90 },
+    },
+    unresolved_variables: [],
   },
   {
     call_id: "C004",
@@ -97,6 +134,16 @@ const records: CallResultRecord[] = [
     protocol_source: "validated_library",
     condition_code: "J18.9",
     call_timestamp: "2026-03-08T15:15:00Z",
+    // fever >= 101 (w=0.85) + antibiotic_taken == false (w=0.9) → score 1.75 >= threshold 0.8 → RED
+    variables: {
+      shortness_of_breath:  { value: false,  confidence: 0.90 },
+      fever:                { value: 102,   confidence: 0.95 },
+      antibiotic_taken:     { value: false,  confidence: 0.95 },
+      confusion:            { value: false,  confidence: 0.90 },
+      appetite:             { value: true,   confidence: 0.90 },
+      mobility:             { value: true,   confidence: 0.90 },
+    },
+    unresolved_variables: [],
   },
   {
     call_id: "C005",
@@ -115,6 +162,16 @@ const records: CallResultRecord[] = [
     protocol_source: "validated_library",
     condition_code: "I21.9",
     call_timestamp: "2026-03-08T15:30:00Z",
+    // chest_pain == true (w=0.95) + medication_adherence == false (w=0.85) → score 1.8 >= threshold 0.8 → RED
+    variables: {
+      chest_pain:           { value: true,   confidence: 0.95 },
+      shortness_of_breath:  { value: false,  confidence: 0.90 },
+      medication_adherence: { value: false,  confidence: 0.95 },
+      dizziness:            { value: false,  confidence: 0.90 },
+      fever:                { value: 98.6,  confidence: 0.90 },
+      mobility:             { value: true,   confidence: 0.90 },
+    },
+    unresolved_variables: [],
   },
   {
     call_id: "C006",
@@ -138,6 +195,16 @@ const records: CallResultRecord[] = [
     protocol_source: "none",
     condition_code: "N18.3",
     call_timestamp: "2026-03-08T15:45:00Z",
+    // call_status INCOMPLETE + empty variables → hard-stop INCOMPLETE
+    variables: {},
+    unresolved_variables: [
+      "swelling",
+      "medication_adherence",
+      "shortness_of_breath",
+      "appetite",
+      "dizziness",
+      "mobility",
+    ],
   },
 ];
 
