@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": "../../..",
+    "outDir": "./dist",
+    "paths": {
+      "@sentinel/schemas": ["../../shared/schemas/src/index.ts"],
+      "@sentinel/lace": ["../../shared/lace/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}
