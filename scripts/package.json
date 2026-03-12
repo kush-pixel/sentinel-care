@@ -18,11 +18,14 @@
     "seed:all": "npm run seed:fhir && npm run seed:encounters && npm run seed:rules && npm run seed:demo && npm run seed:reviews",
     "lace": "ts-node src/lace/calculate-all.ts",
     "verify": "ts-node src/verify.ts",
-    "clear": "ts-node src/clear.ts"
+    "clear": "ts-node src/clear.ts",
+    "validate:sfn": "ts-node --project ../step-functions/tsconfig.json ../step-functions/validate.ts",
+    "deploy:sfn": "ts-node --project ../step-functions/tsconfig.json ../step-functions/deploy.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.490.0",
     "@aws-sdk/client-lambda": "^3.490.0",
+    "@aws-sdk/client-sfn": "^3.490.0",
     "@aws-sdk/lib-dynamodb": "^3.490.0",
     "@sentinel/lace": "*",
     "@sentinel/schemas": "*",

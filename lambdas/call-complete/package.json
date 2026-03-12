@@ -1,0 +1,21 @@
+{
+  "name": "@sentinel/call-complete",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Finalises call answers and triggers the triage engine when a Connect contact ends",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/client-lambda": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "@sentinel/schemas": "*",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "ts-node": "^10.9.2",
+    "typescript": "*"
+  }
+}
