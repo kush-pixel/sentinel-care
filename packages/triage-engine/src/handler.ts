@@ -7,6 +7,8 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import type { TriageProtocol, PatientAnswers } from "@sentinel/schemas";
+import { auditLog, auditEscalation } from "@sentinel/audit";
+import { validatePatientId, validateCallId } from "@sentinel/validation";
 import { evaluateProtocol } from "./evaluator";
 
 // ─── AWS clients ──────────────────────────────────────────────────────────────
@@ -28,8 +30,11 @@ export const handler = async (
 ): Promise<object> => {
 
   // STEP 1 — Validate input
-  if (!event.callId || !event.patientId) {
-    return { statusCode: 400, error: "callId and patientId required" };
+  if (!validatePatientId(event.patientId)) {
+    return { statusCode: 400, error: "Invalid patientId format" };
+  }
+  if (!validateCallId(event.callId)) {
+    return { statusCode: 400, error: "Invalid callId format" };
   }
 
   // STEP 2 — Load protocol from TriageProtocols
@@ -72,6 +77,16 @@ export const handler = async (
   const skippedVariables = triageResult.nodeResult.conditionResults
     .filter((r) => r.actualValue === undefined)
     .map((r) => r.variable);
+
+  auditLog({
+    eventType: "TRIAGE_COMPLETE",
+    patientId: event.patientId,
+    callId: event.callId,
+    performedBy: "TRIAGE_ENGINE",
+    action: `Triage completed — status: ${triageResult.flagColor}`,
+    timestamp: new Date().toISOString(),
+    success: true,
+  });
 
   const isRed = triageResult.flagColor === "RED";
 
@@ -132,9 +147,11 @@ export const handler = async (
           }),
         })
       );
+      auditEscalation(event.patientId, event.callId, true);
     }
   } catch (error: unknown) {
     console.error("SNS publish failed — triage still saved:", error);
+    auditEscalation(event.patientId, event.callId, false);
   }
 
   // STEP 7 — Return response

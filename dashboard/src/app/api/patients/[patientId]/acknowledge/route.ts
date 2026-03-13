@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "@/lib/dynamo";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 interface AcknowledgeBody {
   callId: string;
@@ -11,6 +12,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { patientId: string } }
 ): Promise<NextResponse> {
+  const rateLimit = checkRateLimit("acknowledge-api", {
+    maxRequests: 20,
+    windowMs: 60000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   try {
     const body = (await req.json()) as AcknowledgeBody;
     const { callId, acknowledgedBy } = body;
@@ -43,7 +52,7 @@ export async function POST(
   } catch (err) {
     console.error("POST /api/patients/[patientId]/acknowledge error:", err);
     return NextResponse.json(
-      { error: "Failed to acknowledge patient" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

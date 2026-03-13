@@ -5,7 +5,7 @@ import { calculateLaceScore } from "@sentinel/lace";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-const PATIENT_IDS = ["P001", "P002", "P003", "P004", "P005", "P006"];
+const PATIENT_IDS = ["P001", "P002", "P003", "P004", "P005", "P006", "P007"];
 
 const CONDITION_LABEL: Record<string, string> = {
   "I50.9":   "CHF      ",
@@ -14,6 +14,7 @@ const CONDITION_LABEL: Record<string, string> = {
   "J18.9":   "Pneumonia",
   "I21.9":   "Acute MI ",
   "N18.3":   "CKD      ",
+  "J44.1":   "COPD     ",
 };
 
 async function main(): Promise<void> {

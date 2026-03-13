@@ -10,6 +10,8 @@ import {
   InvokeModelCommand,
 } from "@aws-sdk/client-bedrock-runtime";
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+import { auditLog } from "@sentinel/audit";
+import { validatePatientId, validateCallId } from "@sentinel/validation";
 import { buildSbarPrompt } from "./sbar-prompt";
 
 // ─── Clients ──────────────────────────────────────────────────────────────────
@@ -36,8 +38,11 @@ export const handler = async (event: {
   patientId: string;
 }): Promise<object> => {
   // STEP 1 — Validate input
-  if (!event.callId || !event.patientId) {
-    return { statusCode: 400, error: "callId and patientId required" };
+  if (!validatePatientId(event.patientId)) {
+    return { statusCode: 400, error: "Invalid patientId format" };
+  }
+  if (!validateCallId(event.callId)) {
+    return { statusCode: 400, error: "Invalid callId format" };
   }
 
   // STEP 2 — Load CallResults record
@@ -231,6 +236,16 @@ R (Recommendation): Nurse review required. Contact patient for follow-up.`;
       },
     })
   );
+
+  auditLog({
+    eventType: "SBAR_GENERATED",
+    patientId: event.patientId,
+    callId: event.callId,
+    performedBy: "SUMMARIZER",
+    action: "SBAR summary generated and saved",
+    timestamp: new Date().toISOString(),
+    success: true,
+  });
 
   // STEP 8 — SNS alert if RED
   if (typedTriageStatus === "RED") {

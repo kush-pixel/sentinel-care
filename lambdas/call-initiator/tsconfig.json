@@ -5,7 +5,9 @@
     "outDir": "./dist",
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "paths": {}
+    "paths": {
+      "@sentinel/validation": ["../../shared/validation/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

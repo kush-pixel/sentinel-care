@@ -11,6 +11,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.490.0",
     "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "@swc/helpers": "^0.5.19",
     "dotenv": "^16.4.1",
     "next": "^14.2.0",
     "react": "^18",

@@ -1,0 +1,14 @@
+{
+  "name": "@sentinel/audit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PHI audit logger — emits structured [AUDIT] log lines without exposing clinical data",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "typescript": "*"
+  }
+}

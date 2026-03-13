@@ -1,0 +1,14 @@
+{
+  "name": "@sentinel/validation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Input validation utilities — validates patientId, callId, confidence values and sanitises error messages",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "typescript": "*"
+  }
+}

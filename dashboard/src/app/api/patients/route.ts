@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "@/lib/dynamo";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { PatientRecord, DashboardStats } from "@/lib/types";
 
 // ─── Urgency sort priority ────────────────────────────────────────────────────
@@ -110,6 +111,11 @@ function mapItem(item: Record<string, unknown>): PatientRecord {
 // ─── GET /api/patients ────────────────────────────────────────────────────────
 
 export async function GET(): Promise<NextResponse> {
+  const rateLimit = checkRateLimit("patients-api");
+  if (!rateLimit.allowed) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   try {
     const table = process.env.DYNAMO_TABLE_RESULTS ?? "CallResults";
     const result = await docClient.send(
@@ -135,7 +141,7 @@ export async function GET(): Promise<NextResponse> {
   } catch (err) {
     console.error("GET /api/patients error:", err);
     return NextResponse.json(
-      { error: "Failed to load patient records" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

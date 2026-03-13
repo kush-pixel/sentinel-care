@@ -6,8 +6,10 @@
     "rootDir": "../../..",
     "outDir": "./dist",
     "paths": {
+      "@sentinel/audit": ["../../shared/audit/src/index.ts"],
       "@sentinel/schemas": ["../../shared/schemas/src/index.ts"],
-      "@sentinel/lace": ["../../shared/lace/src/index.ts"]
+      "@sentinel/lace": ["../../shared/lace/src/index.ts"],
+      "@sentinel/validation": ["../../shared/validation/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

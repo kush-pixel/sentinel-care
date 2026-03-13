@@ -3,6 +3,7 @@ import * as path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
+import { validatePatientId, validateCallId } from "@sentinel/validation";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -28,11 +29,14 @@ export const handler = async (
 ): Promise<object> => {
 
   // STEP 1 — Validate input
-  if (!event.patientId || !event.phoneNumber || !event.callId) {
-    return {
-      statusCode: 400,
-      error: "patientId, phoneNumber, callId required",
-    };
+  if (!validatePatientId(event.patientId)) {
+    return { statusCode: 400, error: "Invalid patientId format" };
+  }
+  if (!validateCallId(event.callId)) {
+    return { statusCode: 400, error: "Invalid callId format" };
+  }
+  if (!event.phoneNumber) {
+    return { statusCode: 400, error: "patientId, phoneNumber, callId required" };
   }
 
   // STEP 2 — Confirm protocol exists

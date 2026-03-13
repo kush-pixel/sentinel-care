@@ -13,6 +13,8 @@ import {
   FhirNotFoundError,
 } from "../../../scripts/src/fhir/fhir-client";
 import { getRulesForPatient } from "../../../scripts/src/rules/clinical-rules-client";
+import { auditDataAccess, auditLog } from "@sentinel/audit";
+import { validatePatientId } from "@sentinel/validation";
 import { scoreConfidence } from "./confidence";
 import { buildCarePlannerPrompt } from "./planner-prompt";
 import { callNovaPro } from "./bedrock-caller";
@@ -37,8 +39,8 @@ export const handler = async (
 ): Promise<object> => {
 
   // STEP 1 — Validate input
-  if (!event.patientId || typeof event.patientId !== "string") {
-    return { statusCode: 400, error: "patientId required" };
+  if (!validatePatientId(event.patientId)) {
+    return { statusCode: 400, error: "Invalid patientId format" };
   }
 
   // STEP 2 — Load FHIR patient
@@ -52,6 +54,8 @@ export const handler = async (
     const msg = err instanceof Error ? err.message : String(err);
     return { statusCode: 500, error: "FHIR read failed", details: msg };
   }
+
+  auditDataAccess(event.patientId, "CARE_PLANNER", "FHIR patient record loaded");
 
   // STEP 3 — Calculate LACE score
   const dischargeDateExt = patientRecord.patient.extension?.find(
@@ -234,6 +238,15 @@ export const handler = async (
       },
     })
   );
+
+  auditLog({
+    eventType: "PROTOCOL_GENERATED",
+    patientId: event.patientId,
+    performedBy: "CARE_PLANNER",
+    action: `Protocol generated — status: ${status}`,
+    timestamp: new Date().toISOString(),
+    success: true,
+  });
 
   // STEP 14 — If AUTO_APPROVED save to TriageProtocols
   if (status === "AUTO_APPROVED") {

@@ -10,6 +10,7 @@
     "@aws-sdk/client-dynamodb": "^3.490.0",
     "@aws-sdk/lib-dynamodb": "^3.490.0",
     "@sentinel/schemas": "*",
+    "@sentinel/validation": "*",
     "dotenv": "^16.4.1"
   },
   "devDependencies": {
