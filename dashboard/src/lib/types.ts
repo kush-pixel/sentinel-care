@@ -60,6 +60,12 @@ export interface ProtocolReviewRecord {
   reviewNotes: string | null;
   createdAt: string;
   approvedAt: string | null;
+  isRegeneration?: boolean;
+  previousReviewId?: string | null;
+  regenerationReason?: string | null;
+  regenerationCount?: number;
+  regeneratedAs?: string | null;
+  regenerationTriggeredAt?: string | null;
   protocol: {
     patient_id: string;
     preferred_language: string;

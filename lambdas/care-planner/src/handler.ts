@@ -4,7 +4,7 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { TriageProtocol } from "@sentinel/schemas";
 import { calculateLaceScore } from "@sentinel/lace";
 import {
@@ -35,12 +35,27 @@ function makeDynamo(): DynamoDBDocumentClient {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export const handler = async (
-  event: { patientId: string }
+  event: {
+    patientId: string;
+    regeneration?: {
+      previousReviewId: string;
+      rejectionReason: string;
+      rejectedAt: string;
+      reviewedBy: string;
+    };
+  }
 ): Promise<object> => {
 
   // STEP 1 — Validate input
   if (!validatePatientId(event.patientId)) {
     return { statusCode: 400, error: "Invalid patientId format" };
+  }
+
+  // STEP 1b — Log regeneration context if present
+  if (event.regeneration) {
+    console.log(
+      `[REGENERATION] Patient ${event.patientId}\n     Previous review: ${event.regeneration.previousReviewId}\n     Rejection reason: ${event.regeneration.rejectionReason}\n     Requested by: ${event.regeneration.reviewedBy}`
+    );
   }
 
   // STEP 2 — Load FHIR patient
@@ -109,6 +124,9 @@ export const handler = async (
     rules,
     targetLanguage,
     laceResult,
+    ...(event.regeneration
+      ? { regenerationContext: event.regeneration.rejectionReason }
+      : {}),
   });
 
   // STEP 8 — Call Nova Pro
@@ -202,14 +220,35 @@ export const handler = async (
     ? confidenceResult.reasons.join(". ")
     : null;
 
-  // STEP 12 — Generate review ID
-  const reviewId = `REV-${event.patientId}-${Date.now()}`;
+  // STEP 12 — Generate review ID (use REGEN suffix when regenerating)
+  const reviewId = event.regeneration
+    ? `REV-${event.patientId}-REGEN-${Date.now()}`
+    : `REV-${event.patientId}-${Date.now()}`;
 
   // STEP 13 — Save to ProtocolReview
   const dynamo = makeDynamo();
   const protocolsTable = process.env["DYNAMO_TABLE_PROTOCOLS"] ?? "TriageProtocols";
   const reviewsTable = process.env["DYNAMO_TABLE_REVIEWS"] ?? "ProtocolReview";
   const now = new Date().toISOString();
+
+  // If regeneration, fetch previous regeneration_count to increment it
+  let regenerationCount = 1;
+  if (event.regeneration) {
+    const prevRecord = await dynamo.send(
+      new GetCommand({
+        TableName: reviewsTable,
+        Key: {
+          review_id: event.regeneration.previousReviewId,
+          patient_id: event.patientId,
+        },
+      })
+    );
+    const prevCount =
+      typeof prevRecord.Item?.["regeneration_count"] === "number"
+        ? (prevRecord.Item["regeneration_count"] as number)
+        : 0;
+    regenerationCount = prevCount + 1;
+  }
 
   await dynamo.send(
     new PutCommand({
@@ -235,6 +274,14 @@ export const handler = async (
         review_notes: null,
         created_at: now,
         approved_at: status === "AUTO_APPROVED" ? now : null,
+        ...(event.regeneration
+          ? {
+              is_regeneration: true,
+              previous_review_id: event.regeneration.previousReviewId,
+              regeneration_reason: event.regeneration.rejectionReason,
+              regeneration_count: regenerationCount,
+            }
+          : {}),
       },
     })
   );
@@ -247,6 +294,34 @@ export const handler = async (
     timestamp: new Date().toISOString(),
     success: true,
   });
+
+  // STEP 13b — If regeneration, update the old review to reference the new one
+  if (event.regeneration) {
+    await dynamo.send(
+      new UpdateCommand({
+        TableName: reviewsTable,
+        Key: {
+          review_id: event.regeneration.previousReviewId,
+          patient_id: event.patientId,
+        },
+        UpdateExpression:
+          "SET regenerated_as = :ra, regeneration_triggered_at = :rt",
+        ExpressionAttributeValues: {
+          ":ra": reviewId,
+          ":rt": now,
+        },
+      })
+    );
+
+    auditLog({
+      eventType: "PROTOCOL_GENERATED",
+      patientId: event.patientId,
+      performedBy: "CARE_PLANNER",
+      action: `Protocol regenerated after rejection. Previous: ${event.regeneration.previousReviewId} New: ${reviewId}`,
+      timestamp: new Date().toISOString(),
+      success: true,
+    });
+  }
 
   // STEP 14 — If AUTO_APPROVED save to TriageProtocols
   if (status === "AUTO_APPROVED") {
@@ -300,5 +375,12 @@ export const handler = async (
     audioMap,
     preferredLanguage: protocol.preferred_language,
     questionPriority: protocol.question_priority,
+    ...(event.regeneration
+      ? {
+          isRegeneration: true,
+          previousReviewId: event.regeneration.previousReviewId,
+          newReviewId: reviewId,
+        }
+      : {}),
   };
 };

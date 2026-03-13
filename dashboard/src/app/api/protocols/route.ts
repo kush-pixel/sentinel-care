@@ -60,6 +60,12 @@ function mapReview(item: Record<string, unknown>): ProtocolReviewRecord {
     reviewNotes: strNull(item["review_notes"]),
     createdAt: str(item["created_at"]),
     approvedAt: strNull(item["approved_at"]),
+    isRegeneration: item["is_regeneration"] === true,
+    previousReviewId: strNull(item["previous_review_id"]),
+    regenerationReason: strNull(item["regeneration_reason"]),
+    regenerationCount: typeof item["regeneration_count"] === "number" ? item["regeneration_count"] : 0,
+    regeneratedAs: strNull(item["regenerated_as"]),
+    regenerationTriggeredAt: strNull(item["regeneration_triggered_at"]),
     protocol: (item["protocol"] as ProtocolReviewRecord["protocol"]) ?? null,
   };
 }

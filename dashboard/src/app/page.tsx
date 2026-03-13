@@ -287,6 +287,28 @@ function ReviewModal({
         </div>
 
         <div className="px-6 py-5 space-y-6">
+          {/* Section 0: Regeneration banner (shown above everything when this is a revised protocol) */}
+          {review.isRegeneration && (
+            <div className="rounded-lg border border-amber-600 bg-amber-950 p-4">
+              <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                ↻ REVISED PROTOCOL
+              </h3>
+              <p className="text-sm text-amber-100 mb-2">
+                This protocol was regenerated in response to clinical feedback:
+              </p>
+              {review.regenerationReason && (
+                <p className="text-sm text-amber-200 italic mb-2">
+                  &ldquo;{review.regenerationReason}&rdquo;
+                </p>
+              )}
+              {review.previousReviewId && (
+                <p className="text-xs text-amber-500">
+                  Previous review: {review.previousReviewId}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Section 1: Why needs review */}
           {review.pendingReason && (
             <div className="rounded-lg border border-amber-700 bg-amber-950/50 p-4">
@@ -377,6 +399,12 @@ function ReviewModal({
               )}
             </div>
 
+            {(review.regenerationCount ?? 0) >= 3 && (
+              <div className="rounded-lg border border-amber-600 bg-amber-950/60 px-4 py-3 text-sm text-amber-200">
+                ⚠ This protocol has been revised {review.regenerationCount} times. Please escalate to Clinical Director.
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={() => void handleApprove()}
@@ -388,11 +416,13 @@ function ReviewModal({
               </button>
               <button
                 onClick={() => void handleReject()}
-                disabled={submitting}
-                className="flex-1 py-2.5 rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white font-semibold transition-colors text-sm"
+                disabled={submitting || (review.regenerationCount ?? 0) >= 3}
+                className="flex-1 py-2.5 rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold transition-colors text-sm"
               >
                 ✗ Reject Protocol
-                <span className="block text-xs font-normal opacity-75">reason required above</span>
+                <span className="block text-xs font-normal opacity-75">
+                  {(review.regenerationCount ?? 0) >= 3 ? "escalate to Clinical Director" : "reason required above"}
+                </span>
               </button>
             </div>
           </div>
@@ -489,7 +519,7 @@ function ReviewCard({
 
   return (
     <div className={`rounded-xl border-2 p-4 space-y-3 ${cardClass}`}>
-      {/* Row 1: Status badge + patient + condition + source badge */}
+      {/* Row 1: Status badge + patient + condition + source badge + regeneration badges */}
       <div className="flex items-center gap-2 flex-wrap">
         {isPending && (
           <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-700 text-amber-100">
@@ -511,6 +541,11 @@ function ReviewCard({
         {review.protocolSource === "validated_library" && (
           <span className="px-2 py-0.5 rounded text-xs bg-green-800 text-green-200 font-medium">validated</span>
         )}
+        {review.isRegeneration && (
+          <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-700 text-amber-100">
+            ↻ {(review.regenerationCount ?? 1) > 1 ? `REVISION ${review.regenerationCount}` : "REVISED PROTOCOL"}
+          </span>
+        )}
       </div>
 
       {/* Row 2: Confidence bar */}
@@ -527,6 +562,11 @@ function ReviewCard({
             style={{ width: `${pct}%` }}
           />
         </div>
+        {review.previousReviewId && (
+          <p className="text-xs text-slate-500 italic mt-1">
+            Revised after rejection: {review.previousReviewId}
+          </p>
+        )}
       </div>
 
       {/* Row 3: Pending reason */}
@@ -622,17 +662,18 @@ function Toast({
   type,
 }: {
   message: string;
-  type: "success" | "error";
+  type: "success" | "error" | "warning";
 }) {
+  const cls =
+    type === "success"
+      ? "bg-green-800 border border-green-600 text-green-100"
+      : type === "warning"
+      ? "bg-amber-800 border border-amber-600 text-amber-100"
+      : "bg-red-800 border border-red-600 text-red-100";
+  const icon = type === "success" ? "✓ " : type === "warning" ? "⚠ " : "✗ ";
   return (
-    <div
-      className={`fixed top-4 right-4 z-[60] max-w-sm px-4 py-3 rounded-lg shadow-xl text-sm font-medium transition-all ${
-        type === "success"
-          ? "bg-green-800 border border-green-600 text-green-100"
-          : "bg-red-800 border border-red-600 text-red-100"
-      }`}
-    >
-      {type === "success" ? "✓ " : "✗ "}{message}
+    <div className={`fixed top-4 right-4 z-[60] max-w-sm px-4 py-3 rounded-lg shadow-xl text-sm font-medium transition-all ${cls}`}>
+      {icon}{message}
     </div>
   );
 }
@@ -655,7 +696,7 @@ export default function Page() {
   const [reviews, setReviews] = useState<ProtocolReviewRecord[]>([]);
   const [reviewStats, setReviewStats] = useState<ReviewStats>(DEFAULT_REVIEW_STATS);
   const [selectedReview, setSelectedReview] = useState<ProtocolReviewRecord | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "warning" } | null>(null);
 
   const refreshInterval =
     parseInt(process.env.NEXT_PUBLIC_REFRESH_INTERVAL ?? "30000") || 30000;
@@ -763,7 +804,12 @@ export default function Page() {
         body: JSON.stringify({ patientId: review.patientId, reviewedBy: nurseId, rejectionReason: reason, reviewNotes: notes || undefined }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setToast({ message: `Protocol rejected — clinician notified for Patient ${review.patientId}`, type: "success" });
+      const data = (await res.json()) as { regenerationTriggered?: boolean };
+      if (data.regenerationTriggered) {
+        setToast({ message: `Protocol rejected. Revised protocol is now pending review for Patient ${review.patientId}`, type: "success" });
+      } else {
+        setToast({ message: `Protocol rejected. Regeneration failed — manual review required for Patient ${review.patientId}`, type: "warning" });
+      }
       setSelectedReview(null);
       await fetchReviews();
     } catch (err) {

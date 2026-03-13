@@ -8,6 +8,7 @@ export interface PlannerPromptInput {
   rules: ClinicalRule[];
   targetLanguage: string;
   laceResult: LaceResult;
+  regenerationContext?: string;
 }
 
 function calculateAge(birthDate: string): number {
@@ -20,7 +21,7 @@ function calculateAge(birthDate: string): number {
 }
 
 export function buildCarePlannerPrompt(input: PlannerPromptInput): string {
-  const { patient: record, rules, targetLanguage, laceResult } = input;
+  const { patient: record, rules, targetLanguage, laceResult, regenerationContext } = input;
   const p = record.patient;
 
   const patientId = p.id;
@@ -101,6 +102,23 @@ DO NOT use any threshold not listed above.`
 You must generate safe, general post-discharge thresholds.
 Use only boolean (true/false) thresholds and numeric values in standard clinical ranges.`;
 
+  // ─── Section Regen — Regeneration context (injected when nurse rejected) ───
+
+  const sectionRegen = regenerationContext
+    ? `IMPORTANT — PROTOCOL REGENERATION:
+A clinician reviewed the previous version of this protocol and rejected it with the following feedback:
+
+'${regenerationContext}'
+
+You MUST address this feedback in your revised protocol. However, the following rules are NON-NEGOTIABLE:
+1. All thresholds from the validated clinical rules must be respected exactly as specified
+2. You may ADD questions to address the feedback but may NOT remove any questions that are already in the validated rule set
+3. You may adjust question priority/ordering to better reflect the clinical concern raised
+4. The flag_color assignments from validated rules cannot be changed
+
+Generate a corrected protocol that incorporates this feedback while respecting all clinical rules.`
+    : null;
+
   // ─── Section E — Required output schema ────────────────────────────────────
 
   const sectionE = `Generate a JSON object matching exactly this structure:
@@ -169,6 +187,6 @@ Remember: use only the threshold values provided above.`;
 
   // ─── Assemble prompt ───────────────────────────────────────────────────────
 
-  return [sectionA, sectionB, sectionC, sectionD, sectionE, sectionF, sectionG, sectionH]
+  return [sectionA, sectionB, sectionC, sectionD, ...(sectionRegen ? [sectionRegen] : []), sectionE, sectionF, sectionG, sectionH]
     .join("\n\n");
 }

@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "@/lib/dynamo";
 import { checkRateLimit } from "@/lib/rate-limit";
+// Local dev: direct import — Production: replace with Lambda invoke
+import { handler as carePlannerHandler } from "../../../../../../../lambdas/care-planner/src/handler";
 
 interface RejectBody {
   patientId: string;
   reviewedBy: string;
   rejectionReason: string;
   reviewNotes?: string;
+}
+
+interface CarePlannerResult {
+  statusCode: number;
+  isRegeneration?: boolean;
+  newReviewId?: string;
+  [key: string]: unknown;
 }
 
 export async function POST(
@@ -49,6 +58,7 @@ export async function POST(
     const reviewsTable = process.env.DYNAMO_TABLE_REVIEWS ?? "ProtocolReview";
     const now = new Date().toISOString();
 
+    // STEP 1 — Update ProtocolReview to REJECTED
     await docClient.send(
       new UpdateCommand({
         TableName: reviewsTable,
@@ -71,12 +81,45 @@ export async function POST(
       `[AUDIT] PROTOCOL_REJECTED patient=${patientId} reviewId=${reviewId} by=${reviewedBy} reason=${rejectionReason.trim()}`
     );
 
-    return NextResponse.json({
-      success: true,
-      reviewId,
-      patientId,
-      status: "REJECTED",
-    });
+    // STEP 2 — Trigger Care Planner to regenerate (rejection must succeed even if this fails)
+    try {
+      const regenerationResult = (await carePlannerHandler({
+        patientId,
+        regeneration: {
+          previousReviewId: reviewId,
+          rejectionReason: rejectionReason.trim(),
+          rejectedAt: now,
+          reviewedBy,
+        },
+      })) as CarePlannerResult;
+
+      const newReviewId = regenerationResult.newReviewId ?? null;
+
+      return NextResponse.json({
+        success: true,
+        reviewId,
+        patientId,
+        status: "REJECTED",
+        regenerationTriggered: true,
+        newReviewId,
+        message: "Protocol rejected and regeneration triggered. New protocol is pending review.",
+      });
+    } catch (regenErr) {
+      console.error(
+        `[REGEN_FAILED] Care planner regeneration failed for patient=${patientId} reviewId=${reviewId}:`,
+        regenErr
+      );
+
+      return NextResponse.json({
+        success: true,
+        reviewId,
+        patientId,
+        status: "REJECTED",
+        regenerationTriggered: false,
+        regenerationError: "Regeneration failed — manual review required",
+        message: "Protocol rejected. Regeneration failed — please contact the care team.",
+      });
+    }
   } catch (err) {
     console.error(`POST /api/protocols/${params.reviewId}/reject error:`, err);
     return NextResponse.json(
