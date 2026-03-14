@@ -18,6 +18,9 @@ export interface PatientRecord {
   acknowledgedAt: string | null;
   conditionCode: string;
   guidelineSource: string;
+  ruleVersionId: string | null;
+  ruleVersion: number | null;
+  ruleEffectiveFrom: string | null;
   callTimestamp: string;
   triageCompletedAt: string | null;
   protocolSource: string | null;
@@ -60,6 +63,9 @@ export interface ProtocolReviewRecord {
   reviewNotes: string | null;
   createdAt: string;
   approvedAt: string | null;
+  ruleVersionId?: string | null;
+  ruleVersion?: number | null;
+  ruleEffectiveFrom?: string | null;
   isRegeneration?: boolean;
   previousReviewId?: string | null;
   regenerationReason?: string | null;

@@ -146,6 +146,15 @@ export const ClinicalRuleSchema = z.object({
   conditions: z.array(ClinicalRuleConditionSchema).min(1),
   logic: z.enum(["AND", "OR"]),
   weighted_threshold: z.number().min(0).max(1),
+  // ── Versioning fields (optional for backwards compatibility with legacy data) ──
+  version: z.number().int().min(1).default(1),
+  version_id: z.string().optional(),
+  is_latest: z.boolean().default(true),
+  effective_from: z.string().optional(),
+  superseded_by: z.string().nullable().default(null),
+  change_notes: z.string().nullable().default(null),
+  created_by: z.string().default("SYSTEM"),
+  created_at: z.string().optional(),
 });
 
 export type ClinicalRule = z.infer<typeof ClinicalRuleSchema>;

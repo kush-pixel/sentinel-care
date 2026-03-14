@@ -186,6 +186,14 @@ function SbarModal({
             <div>
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Guideline Source</h3>
               <p className="text-sm text-slate-300">{patient.guidelineSource}</p>
+              {patient.ruleVersionId && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Rule version: {patient.ruleVersionId.includes("#v") ? `v${patient.ruleVersionId.split("#v")[1]}` : patient.ruleVersionId}
+                  {patient.ruleEffectiveFrom
+                    ? ` (effective ${new Date(patient.ruleEffectiveFrom).toLocaleDateString()})`
+                    : ""}
+                </p>
+              )}
             </div>
           )}
           {patient.brokenRules.length > 0 && (
@@ -328,9 +336,17 @@ function ReviewModal({
           {/* Section 3: Protocol questions table */}
           {conditions.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                 Proposed Protocol — {review.protocol?.question_priority?.length ?? 0} questions
               </h3>
+              {review.ruleVersionId && (
+                <p className="text-xs text-amber-400 font-medium mb-3">
+                  Protocol generated using rule {review.ruleVersionId.includes("#v") ? `v${review.ruleVersionId.split("#v")[1]}` : review.ruleVersionId}
+                  {review.ruleEffectiveFrom
+                    ? ` (effective ${new Date(review.ruleEffectiveFrom).toLocaleDateString()})`
+                    : ""}
+                </p>
+              )}
               <div className="overflow-x-auto rounded-lg border border-slate-700">
                 <table className="w-full text-sm">
                   <thead>

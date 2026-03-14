@@ -7,12 +7,12 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getLaceForPatient, calculateLaceScore } from "@sentinel/lace";
 import { TriageProtocol } from "@sentinel/schemas";
+import { getLatestRule } from "@sentinel/validation";
 import {
   getFullPatientRecord,
   getPatientEncounterSummary,
   FhirNotFoundError,
 } from "../../../scripts/src/fhir/fhir-client";
-import { getRulesForPatient } from "../../../scripts/src/rules/clinical-rules-client";
 import { auditDataAccess, auditLog } from "@sentinel/audit";
 import { validatePatientId } from "@sentinel/validation";
 import { scoreConfidence } from "./confidence";
@@ -141,9 +141,20 @@ export const handler = async (
     );
   }
 
-  // STEP 4 — Load clinical rules
-  const rules = await getRulesForPatient(conditionCodes);
+  // STEP 4 — Load clinical rules (latest version from versioned ClinicalRules table)
+  const rulesTable2 = process.env["DYNAMO_TABLE_RULES"] ?? "ClinicalRules";
+  const ruleResults = await Promise.all(
+    conditionCodes.map((code) => getLatestRule(code, dynamo, rulesTable2))
+  );
+  const rules = ruleResults.filter((r): r is NonNullable<typeof r> => r !== null);
   const rulesFound = rules.length > 0;
+
+  // Extract version metadata from the first matched rule.
+  // Cast via Record to avoid strict-mode errors on optional versioning fields.
+  const primaryRuleRaw    = (rules[0] ?? null) as Record<string, unknown> | null;
+  const ruleVersionId     = (primaryRuleRaw?.["version_id"]     as string | undefined) ?? null;
+  const ruleVersion       = (primaryRuleRaw?.["version"]        as number | undefined) ?? null;
+  const ruleEffectiveFrom = (primaryRuleRaw?.["effective_from"] as string | undefined) ?? null;
 
   // STEP 5 — Check FHIR completeness
   const fhirRecordComplete =
@@ -289,7 +300,7 @@ export const handler = async (
     (protocol.root_node as Record<string, unknown>)["conditions"] =
       (protocol.root_node.conditions as Record<string, unknown>[]).map((condition) => {
         const matched = clinicalRule.conditions.find(
-          (c) => c.variable === (condition as Record<string, unknown>)["variable"]
+          (c: { variable: string }) => c.variable === (condition as Record<string, unknown>)["variable"]
         );
         return {
           ...condition,
@@ -342,6 +353,9 @@ export const handler = async (
         lace_risk_level: laceResult.riskLevel,
         lace_interpretation: laceResult.interpretation,
         lace_components: laceResult.components,
+        rule_version_id:    ruleVersionId,
+        rule_version:       ruleVersion,
+        rule_effective_from: ruleEffectiveFrom,
         rejection_reason: null,
         reviewed_by: status === "AUTO_APPROVED" ? "SYSTEM" : null,
         reviewed_at: status === "AUTO_APPROVED" ? now : null,
@@ -407,6 +421,9 @@ export const handler = async (
           protocol,
           lace_score: laceResult.totalScore,
           lace_risk_level: laceResult.riskLevel,
+          rule_version_id:    ruleVersionId,
+          rule_version:       ruleVersion,
+          rule_effective_from: ruleEffectiveFrom,
           created_at: now,
           approved_by: "SYSTEM",
           review_id: reviewId,

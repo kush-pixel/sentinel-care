@@ -8,7 +8,7 @@ import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from "@aws-sdk/lib-
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import type { TriageProtocol, PatientAnswers } from "@sentinel/schemas";
 import { auditLog, auditEscalation } from "@sentinel/audit";
-import { validatePatientId, validateCallId } from "@sentinel/validation";
+import { validatePatientId, validateCallId, getLatestRule, getRuleVersion } from "@sentinel/validation";
 import { getLaceForPatient } from "@sentinel/lace";
 import { evaluateProtocol } from "./evaluator";
 
@@ -84,16 +84,29 @@ export const handler = async (
 
   const answers = callResponse.Item as unknown as PatientAnswers;
 
-  // STEP 3b — Enforce flag_color from ClinicalRules (runtime safety net)
-  const conditionCode = callResponse.Item["condition_code"] as string | undefined;
+  // STEP 3b — Enforce flag_color from ClinicalRules using the exact rule version
+  // stored in the protocol (so existing protocols are always evaluated against the
+  // rule they were generated with, not whatever the latest version happens to be).
+  const conditionCode   = callResponse.Item["condition_code"]  as string | undefined;
+  const storedVersionId = protocolResponse.Item["rule_version_id"] as string | undefined;
+  const rulesTableName  = process.env["DYNAMO_TABLE_RULES"] ?? "ClinicalRules";
+
   if (conditionCode) {
-    const ruleResponse = await docClient.send(
-      new GetCommand({
-        TableName: process.env["DYNAMO_TABLE_RULES"] ?? "ClinicalRules",
-        Key: { condition_code: conditionCode },
-      })
-    );
-    const clinicalRule = ruleResponse.Item;
+    let clinicalRule: Record<string, unknown> | null = null;
+
+    if (storedVersionId) {
+      // Load the exact version this protocol was generated with
+      const versioned = await getRuleVersion(conditionCode, storedVersionId, docClient, rulesTableName);
+      clinicalRule = versioned as Record<string, unknown> | null;
+    } else {
+      // Legacy protocol with no rule_version_id — fall back to latest
+      console.warn(
+        `[VERSION] Protocol for ${event.patientId} has no rule_version_id — using latest rule version`
+      );
+      const latest = await getLatestRule(conditionCode, docClient, rulesTableName);
+      clinicalRule = latest as Record<string, unknown> | null;
+    }
+
     if (clinicalRule?.["conditions"] && protocol.root_node?.conditions) {
       const ruleConditions = clinicalRule["conditions"] as Record<string, unknown>[];
       (protocol.root_node as Record<string, unknown>)["conditions"] =
@@ -105,6 +118,32 @@ export const handler = async (
     }
     if (clinicalRule?.["flag_color"]) {
       (protocol as Record<string, unknown>)["flag_color"] = clinicalRule["flag_color"];
+    }
+
+    // Write rule provenance + guideline source to CallResults for dashboard display
+    const guideline = clinicalRule?.["guideline_source"] as string | undefined;
+    const ruleVer   = clinicalRule?.["version"]          as number | undefined;
+    const ruleVerId = clinicalRule?.["version_id"]       as string | undefined;
+    const ruleEff   = clinicalRule?.["effective_from"]   as string | undefined;
+    if (guideline || ruleVerId) {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: process.env["DYNAMO_TABLE_RESULTS"],
+          Key: { call_id: event.callId, patient_id: event.patientId },
+          UpdateExpression: [
+            "SET guideline_source   = :gs",
+            "    rule_version_id    = :rv",
+            "    rule_version       = :rn",
+            "    rule_effective_from = :re",
+          ].join(", "),
+          ExpressionAttributeValues: {
+            ":gs": guideline    ?? null,
+            ":rv": ruleVerId    ?? null,
+            ":rn": ruleVer      ?? null,
+            ":re": ruleEff      ?? null,
+          },
+        })
+      );
     }
   }
 

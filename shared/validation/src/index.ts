@@ -1,6 +1,8 @@
+// ─── Rule versioning utilities ────────────────────────────────────────────────
+export * from "./rule-versioning";
+
 // ─── Input Validation ─────────────────────────────────────────────────────────
-// Zero AWS SDK imports — pure functions only.
-// All functions return false on invalid input and never throw.
+// Pure functions only — no AWS SDK imports in this section.
 
 export function validatePatientId(patientId: unknown): boolean {
   if (typeof patientId !== "string") return false;
