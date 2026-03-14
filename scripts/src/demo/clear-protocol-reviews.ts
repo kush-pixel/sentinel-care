@@ -24,7 +24,7 @@ function makeDynamo(): DynamoDBDocumentClient {
   return DynamoDBDocumentClient.from(raw);
 }
 
-async function main(): Promise<void> {
+export async function clearProtocolReviews(): Promise<void> {
   const dynamo = makeDynamo();
   const table = process.env["DYNAMO_TABLE_REVIEWS"] ?? "ProtocolReview";
 
@@ -71,10 +71,16 @@ async function main(): Promise<void> {
   const remaining = verify.Count ?? 0;
   console.log(`Remaining records: ${remaining}`);
   console.log(`clear:reviews: ${remaining === 0 ? "PASS" : "FAIL — table not empty"}`);
-  if (remaining !== 0) process.exit(1);
+  if (remaining !== 0) throw new Error(`Table not empty: ${remaining} record(s) remain`);
 }
 
-main().catch((err: unknown) => {
-  console.error("clear-protocol-reviews failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  await clearProtocolReviews();
+}
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("clear-protocol-reviews failed:", err);
+    process.exit(1);
+  });
+}

@@ -28,14 +28,31 @@ export async function getRulesForCondition(
 ): Promise<ClinicalRule | null> {
   try {
     const client = makeClient();
-    const res = await client.send(
+    const tbl = rulesTable();
+
+    // 1. Read LATEST pointer to find the current version_id
+    const latestRes = await client.send(
       new GetItemCommand({
-        TableName: rulesTable(),
-        Key: marshall({ condition_code: conditionCode }),
+        TableName: tbl,
+        Key: marshall({ condition_code: conditionCode, version_id: "LATEST" }),
       })
     );
-    if (!res.Item) return null;
-    const raw = unmarshall(res.Item);
+    if (!latestRes.Item) return null;
+
+    const latestData = unmarshall(latestRes.Item) as { latest_version_id?: string };
+    const latestVersionId = latestData.latest_version_id;
+    if (!latestVersionId) return null;
+
+    // 2. Fetch the actual versioned rule record
+    const ruleRes = await client.send(
+      new GetItemCommand({
+        TableName: tbl,
+        Key: marshall({ condition_code: conditionCode, version_id: latestVersionId }),
+      })
+    );
+    if (!ruleRes.Item) return null;
+
+    const raw = unmarshall(ruleRes.Item);
     const parsed = ClinicalRuleSchema.safeParse(raw);
     if (!parsed.success) return null;
     return parsed.data;

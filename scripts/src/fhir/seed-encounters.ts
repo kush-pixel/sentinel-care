@@ -237,7 +237,7 @@ const edVisitCounts: Record<string, number> = {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function seedEncounters(): Promise<void> {
   console.log("Seeding Encounter resources...\n");
 
   let successCount = 0;
@@ -316,7 +316,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error("seed-encounters failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> { await seedEncounters(); }
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("seed-encounters failed:", err);
+    process.exit(1);
+  });
+}

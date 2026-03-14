@@ -40,7 +40,7 @@ function fhirBase(): string {
 
 const SEP = "─────────────────────────────────────────────────────────────────";
 
-async function main(): Promise<void> {
+export async function hydrateLace(): Promise<void> {
   console.log(SEP);
   console.log("LACE HYDRATION — PatientProfiles from FHIR");
   console.log(SEP + "\n");
@@ -161,15 +161,19 @@ async function main(): Promise<void> {
   console.log(`\nHydrated: ${passed}/${rows.length} patients`);
   if (failed > 0) {
     console.warn(`⚠ ${failed} patient(s) failed — check FHIR data.`);
-    process.exit(1);
+    throw new Error(`${failed} patient(s) failed LACE hydration`);
   }
   console.log("PatientProfiles hydrated successfully.\n");
 }
 
-main().catch((err: unknown) => {
-  console.error(
-    "hydrate-lace failed:",
-    err instanceof Error ? err.message : String(err)
-  );
-  process.exit(1);
-});
+async function main(): Promise<void> { await hydrateLace(); }
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error(
+      "hydrate-lace failed:",
+      err instanceof Error ? err.message : String(err)
+    );
+    process.exit(1);
+  });
+}

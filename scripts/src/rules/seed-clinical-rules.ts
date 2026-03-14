@@ -6,7 +6,6 @@ import {
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
-import { type ClinicalRule } from "@sentinel/schemas";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -25,7 +24,7 @@ function table(): string {
 
 // ─── Clinical rules ───────────────────────────────────────────────────────────
 
-const rules: ClinicalRule[] = [
+const rules = [
   {
     condition_code: "I50.9",
     condition_display: "Heart failure, unspecified",
@@ -495,37 +494,80 @@ const rules: ClinicalRule[] = [
   },
 ];
 
+// ─── Change notes by condition code (for initial v1 seeding) ──────────────────
+
+const CHANGE_NOTES: Record<string, string> = {
+  "I50.9":   "Initial rule — AHA/ACC 2022 Heart Failure Guidelines",
+  "Z96.651": "Initial rule — AAOS 2023 Post-op Care Guidelines",
+  "E11.9":   "Initial rule — ADA Standards of Care 2024",
+  "J18.9":   "Initial rule — IDSA/ATS Community-acquired Pneumonia Guidelines",
+  "I21.9":   "Initial rule — AHA/ACC STEMI Guidelines 2023",
+  "N18.3":   "Initial rule — KDIGO CKD Guidelines 2024",
+};
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function seedRules(): Promise<void> {
   const client = makeClient();
 
   console.log("Seeding clinical rules...\n");
 
   for (const rule of rules) {
-    const code = rule.condition_code;
+    const code      = rule.condition_code;
+    const versionId = `${code}#v1`;
 
-    // Idempotency check — skip if already present
-    const existing = await client.send(
+    // Idempotency check — skip if LATEST already points to v1
+    const latestRecord = await client.send(
       new GetItemCommand({
         TableName: table(),
-        Key: marshall({ condition_code: code }),
+        Key: marshall({ condition_code: code, version_id: "LATEST" }),
       })
     );
 
-    if (existing.Item) {
-      const row = unmarshall(existing.Item) as { condition_code: string };
-      console.log(`[SKIP] ${row.condition_code} already exists`);
-      continue;
+    if (latestRecord.Item) {
+      const existing = unmarshall(latestRecord.Item) as { latest_version_id?: string };
+      if (existing.latest_version_id === versionId) {
+        console.log(`[SKIP] ${code} already at ${versionId}`);
+        continue;
+      }
     }
+
+    // RECORD 1 — Versioned rule record
+    const now = new Date().toISOString();
+    const versionedRule = {
+      ...rule,
+      version:       1,
+      version_id:    versionId,
+      is_latest:     true,
+      effective_from: "2024-01-01T00:00:00.000Z",
+      superseded_by:  null,
+      change_notes:   CHANGE_NOTES[code] ?? "Initial rule",
+      created_by:     "SYSTEM",
+      created_at:     now,
+    };
 
     await client.send(
       new PutItemCommand({
         TableName: table(),
-        Item: marshall(rule, { removeUndefinedValues: true }),
+        Item: marshall(versionedRule, { removeUndefinedValues: true }),
       })
     );
-    console.log(`[PUT]  ${code}`);
+
+    // RECORD 2 — LATEST pointer
+    await client.send(
+      new PutItemCommand({
+        TableName: table(),
+        Item: marshall({
+          condition_code:    code,
+          version_id:        "LATEST",
+          latest_version:    1,
+          latest_version_id: versionId,
+          updated_at:        now,
+        }),
+      })
+    );
+
+    console.log(`[PUT]  ${code} → ${versionId} + LATEST`);
   }
 
   console.log(
@@ -539,23 +581,32 @@ async function main(): Promise<void> {
   );
 
   for (const rule of rules) {
+    // Verify by reading versioned record (composite key)
     const res = await client.send(
       new GetItemCommand({
         TableName: table(),
-        Key: marshall({ condition_code: rule.condition_code }),
+        Key: marshall({ condition_code: rule.condition_code, version_id: `${rule.condition_code}#v1` }),
       })
     );
     const status = res.Item ? "OK" : "MISSING";
     const row = res.Item
-      ? (unmarshall(res.Item) as ClinicalRule)
+      ? (unmarshall(res.Item) as Record<string, unknown>)
       : rule;
+    const condCode    = String(row["condition_code"]    ?? row.condition_code    ?? "");
+    const condDisplay = String(row["condition_display"] ?? row.condition_display ?? "");
+    const conditions  = (row["conditions"]              ?? row.conditions)       as { length: number };
+    const guidelineSrc = String(row["guideline_source"] ?? row.guideline_source ?? "");
     console.log(
-      `${row.condition_code.padEnd(14)} | ${row.condition_display.slice(0, 37).padEnd(37)} | ${String(row.conditions.length).padEnd(10)} | ${row.guideline_source.slice(0, 15).padEnd(15)} | ${status}`
+      `${condCode.padEnd(14)} | ${condDisplay.slice(0, 37).padEnd(37)} | ${String(conditions.length).padEnd(10)} | ${guidelineSrc.slice(0, 15).padEnd(15)} | ${status}`
     );
   }
 }
 
-main().catch((err: unknown) => {
-  console.error("seed-clinical-rules failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> { await seedRules(); }
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("seed-clinical-rules failed:", err);
+    process.exit(1);
+  });
+}

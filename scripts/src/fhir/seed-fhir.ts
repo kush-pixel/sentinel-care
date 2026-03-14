@@ -360,7 +360,7 @@ const patients = [
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function seedFhir(): Promise<void> {
   console.log("Seeding FHIR patients...\n");
 
   for (const { patient, conditions, medications } of patients) {
@@ -400,7 +400,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error("seed-fhir failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  await seedFhir();
+}
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("seed-fhir failed:", err);
+    process.exit(1);
+  });
+}

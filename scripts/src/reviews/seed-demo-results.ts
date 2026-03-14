@@ -197,7 +197,7 @@ const BASE_RECORDS: Omit<CallResultRecord, "lace_score" | "lace_risk_level" | "l
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function seedDemoResults(): Promise<void> {
   const raw = makeClient();
   const docClient = makeDocClient(raw);
 
@@ -245,7 +245,11 @@ async function main(): Promise<void> {
   console.log("\nAll 5 demo call results written (P004 excluded — protocol pending review).");
 }
 
-main().catch((err: unknown) => {
-  console.error("seed-demo-results failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> { await seedDemoResults(); }
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("seed-demo-results failed:", err);
+    process.exit(1);
+  });
+}

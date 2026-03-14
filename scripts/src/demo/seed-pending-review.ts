@@ -23,7 +23,7 @@ function makeDynamo(): DynamoDBDocumentClient {
   return DynamoDBDocumentClient.from(raw);
 }
 
-async function main(): Promise<void> {
+export async function seedPendingReview(): Promise<void> {
   const dynamo = makeDynamo();
   const reviewsTable = process.env["DYNAMO_TABLE_REVIEWS"] ?? "ProtocolReview";
 
@@ -137,10 +137,14 @@ async function main(): Promise<void> {
     `\nSeed: ${status === "PENDING_REVIEW" ? "PASS" : "FAIL"}`
   );
 
-  if (status !== "PENDING_REVIEW") process.exit(1);
+  if (status !== "PENDING_REVIEW") throw new Error(`REV-P004-DEMO status is "${status ?? "NOT FOUND"}" — expected PENDING_REVIEW`);
 }
 
-main().catch((err: unknown) => {
-  console.error("seed-pending-review failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> { await seedPendingReview(); }
+
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error("seed-pending-review failed:", err);
+    process.exit(1);
+  });
+}
