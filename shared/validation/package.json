@@ -5,7 +5,8 @@
   "description": "Input validation utilities — validates patientId, callId, confidence values and sanitises error messages",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "jest"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.490.0",
@@ -13,7 +14,25 @@
     "@sentinel/schemas": "*"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/node": "*",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.6",
     "typescript": "*"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "globals": {
+      "ts-jest": {
+        "tsconfig": {
+          "module": "CommonJS",
+          "moduleResolution": "Node"
+        }
+      }
+    },
+    "moduleNameMapper": {
+      "^@sentinel/schemas$": "<rootDir>/../../shared/schemas/src/index.ts"
+    }
   }
 }
