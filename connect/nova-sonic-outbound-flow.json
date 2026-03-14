@@ -1,0 +1,123 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "set-contact-attributes",
+  "Metadata": {
+    "entryPointPosition": { "x": 20, "y": 20 },
+    "ActionMetadata": {
+      "set-contact-attributes":        { "position": { "x": 200, "y": 20  } },
+      "start-media-streaming":         { "position": { "x": 450, "y": 20  } },
+      "invoke-nova-sonic":             { "position": { "x": 700, "y": 20  } },
+      "lambda-success-disconnect":     { "position": { "x": 950, "y": 20  } },
+      "lambda-error-prompt":           { "position": { "x": 700, "y": 200 } },
+      "lambda-error-disconnect":       { "position": { "x": 950, "y": 200 } },
+      "streaming-error-prompt":        { "position": { "x": 450, "y": 200 } },
+      "streaming-error-disconnect":    { "position": { "x": 700, "y": 350 } }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "set-contact-attributes",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "patientId":   { "ValueExpression": "$.Attributes.patientId"  },
+          "callId":      { "ValueExpression": "$.Attributes.callId"     },
+          "kvsStreamArn":{ "ValueExpression": "$.Attributes.kvsStreamArn" }
+        }
+      },
+      "Transitions": {
+        "NextAction": "start-media-streaming",
+        "Errors": [
+          { "NextAction": "streaming-error-prompt", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "start-media-streaming",
+      "Type": "StartMediaStreaming",
+      "Parameters": {
+        "MediaStreamingConfigurations": [
+          {
+            "MediaStreamType": "Audio",
+            "Parameters": {
+              "StreamingMode":       "AudioToKVS",
+              "AudioStreamingMode":  "AGENT_AND_CUSTOMER",
+              "MediaStreamArn":      { "ValueExpression": "$.Attributes.kvsStreamArn" }
+            }
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction":  "invoke-nova-sonic",
+        "Errors": [
+          { "NextAction": "streaming-error-prompt", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "invoke-nova-sonic",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "LAMBDA_ARN_NOVA_SONIC",
+        "InvocationTimeLimitSeconds": "900",
+        "LambdaInvocationAttributes": {
+          "patientId":    { "ValueExpression": "$.Attributes.patientId"   },
+          "callId":       { "ValueExpression": "$.Attributes.callId"      },
+          "contactId":    { "ValueExpression": "$.ContactId"              },
+          "streamArn":    { "ValueExpression": "$.Attributes.kvsStreamArn"},
+          "instanceId":   { "ValueExpression": "$.InstanceARN"            }
+        }
+      },
+      "Transitions": {
+        "NextAction": "lambda-success-disconnect",
+        "Errors": [
+          { "NextAction": "lambda-error-prompt", "ErrorType": "NoMatchingError"  },
+          { "NextAction": "lambda-error-prompt", "ErrorType": "TimeLimitExceeded"}
+        ]
+      }
+    },
+    {
+      "Identifier": "lambda-success-disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    },
+    {
+      "Identifier": "lambda-error-prompt",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "We're sorry, we encountered a technical issue with your health check-in. Your care team has been notified. Please call your doctor's office if you have urgent concerns. Goodbye.",
+        "TextToSpeechType": "text"
+      },
+      "Transitions": {
+        "NextAction": "lambda-error-disconnect",
+        "Errors": [
+          { "NextAction": "lambda-error-disconnect", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "lambda-error-disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    },
+    {
+      "Identifier": "streaming-error-prompt",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "We're sorry, we were unable to connect your health check-in call. Your nurse will follow up with you shortly. Goodbye.",
+        "TextToSpeechType": "text"
+      },
+      "Transitions": {
+        "NextAction": "streaming-error-disconnect",
+        "Errors": [
+          { "NextAction": "streaming-error-disconnect", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "streaming-error-disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}

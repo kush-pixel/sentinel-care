@@ -70,6 +70,38 @@
       ]
     },
     {
+      "Sid": "NovaSonicStreaming",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModelWithBidirectionalStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-2-sonic-v1:0",
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-sonic-v1:0"
+      ]
+    },
+    {
+      "Sid": "KinesisVideoAccess",
+      "Effect": "Allow",
+      "Action": [
+        "kinesisvideo:GetDataEndpoint",
+        "kinesisvideo:GetMedia",
+        "kinesisvideo:PutMedia",
+        "kinesisvideo:DescribeStream"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ConnectOutbound",
+      "Effect": "Allow",
+      "Action": [
+        "connect:StartOutboundVoiceContact",
+        "connect:GetContactAttributes",
+        "connect:UpdateContactAttributes"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "CloudWatchLogs",
       "Effect": "Allow",
       "Action": [

@@ -3,6 +3,7 @@ import * as path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
+import fetch from "node-fetch";
 import { validatePatientId, validateCallId } from "@sentinel/validation";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
@@ -22,10 +23,36 @@ const dynamoClient = new DynamoDBClient({
 });
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
 
+function fhirBase(): string {
+  return process.env["FHIR_BASE_URL"] ?? "http://localhost:8080/fhir";
+}
+
+// ─── FHIR phone lookup ────────────────────────────────────────────────────────
+
+interface FhirTelecom {
+  system?: string;
+  value?:  string;
+}
+interface FhirPatientResource {
+  telecom?: FhirTelecom[];
+}
+
+async function getPatientPhone(patientId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${fhirBase()}/Patient/${patientId}`);
+    if (!res.ok) return null;
+    const patient = (await res.json()) as FhirPatientResource;
+    const phone = (patient.telecom ?? []).find((t) => t.system === "phone");
+    return phone?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export const handler = async (
-  event: { patientId: string; phoneNumber: string; callId: string }
+  event: { patientId: string; callId: string; phoneNumber?: string }
 ): Promise<object> => {
 
   // STEP 1 — Validate input
@@ -35,8 +62,17 @@ export const handler = async (
   if (!validateCallId(event.callId)) {
     return { statusCode: 400, error: "Invalid callId format" };
   }
-  if (!event.phoneNumber) {
-    return { statusCode: 400, error: "patientId, phoneNumber, callId required" };
+
+  // STEP 1b — Resolve phone: prefer explicit override, else load from FHIR
+  let patientPhone = event.phoneNumber ?? null;
+  if (!patientPhone) {
+    patientPhone = await getPatientPhone(event.patientId);
+  }
+  if (!patientPhone) {
+    return {
+      statusCode: 400,
+      error:      `No phone number found in FHIR for patient ${event.patientId}`,
+    };
   }
 
   // STEP 2 — Confirm protocol exists
@@ -101,13 +137,14 @@ export const handler = async (
     try {
       const connectResp = await connectClient.send(
         new StartOutboundVoiceContactCommand({
-          DestinationPhoneNumber: event.phoneNumber,
+          DestinationPhoneNumber: patientPhone,
           InstanceId:             process.env["CONNECT_INSTANCE_ID"] ?? "",
           ContactFlowId:          contactFlowId,
           QueueId:                queueId,
           Attributes: {
-            patientId: event.patientId,
-            callId:    event.callId,
+            patientId:    event.patientId,
+            callId:       event.callId,
+            kvsStreamArn: process.env["KVS_STREAM_ARN"] ?? "",
           },
         })
       );
