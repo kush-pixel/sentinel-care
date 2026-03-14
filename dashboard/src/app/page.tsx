@@ -569,8 +569,18 @@ function ReviewCard({
         )}
       </div>
 
-      {/* Row 3: Pending reason */}
-      {isPending && review.pendingReason && (
+      {/* Row 3: Regeneration context box (PENDING + regenerated) */}
+      {isPending && review.isRegeneration && review.regenerationReason && (
+        <div className="rounded-lg border border-amber-700 bg-amber-950/60 px-3 py-2 space-y-0.5">
+          <p className="text-xs font-semibold text-amber-400">↻ Revised after rejection</p>
+          <p className="text-xs text-amber-200 italic leading-relaxed">
+            Previous feedback: &ldquo;{review.regenerationReason}&rdquo;
+          </p>
+        </div>
+      )}
+
+      {/* Row 3b: Pending reason (non-regenerated cards only) */}
+      {isPending && review.pendingReason && !review.isRegeneration && (
         <p className="text-xs text-slate-400 italic leading-relaxed">{review.pendingReason}</p>
       )}
 
@@ -696,6 +706,7 @@ export default function Page() {
   const [reviews, setReviews] = useState<ProtocolReviewRecord[]>([]);
   const [reviewStats, setReviewStats] = useState<ReviewStats>(DEFAULT_REVIEW_STATS);
   const [selectedReview, setSelectedReview] = useState<ProtocolReviewRecord | null>(null);
+  const [pendingProtocolCount, setPendingProtocolCount] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "warning" } | null>(null);
 
   const refreshInterval =
@@ -708,9 +719,12 @@ export default function Page() {
     try {
       const res = await fetch("/api/patients", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { patients: PatientRecord[]; stats: DashboardStats };
+      const data = (await res.json()) as { patients: PatientRecord[]; stats: DashboardStats; pendingProtocolCount?: number };
       setPatients(data.patients);
       setStats(data.stats);
+      if (data.pendingProtocolCount !== undefined) {
+        setPendingProtocolCount(data.pendingProtocolCount);
+      }
       setLastRefresh(new Date());
     } catch (err) {
       console.error("Failed to fetch patients:", err);
@@ -854,12 +868,12 @@ export default function Page() {
             <button
               onClick={() => setActiveTab("protocols")}
               className={`flex items-center gap-1 px-3 py-1 rounded-full border text-sm font-semibold transition-colors ${
-                reviewStats.pending > 0
+                (pendingProtocolCount ?? reviewStats.pending) > 0
                   ? "bg-amber-900 border-amber-600 text-amber-200 hover:bg-amber-800"
                   : "bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700"
               }`}
             >
-              📋 {reviewStats.pending} PENDING REVIEW
+              📋 {pendingProtocolCount ?? reviewStats.pending} PENDING REVIEW
             </button>
           </div>
 

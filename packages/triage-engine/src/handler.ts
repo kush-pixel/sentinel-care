@@ -9,6 +9,7 @@ import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import type { TriageProtocol, PatientAnswers } from "@sentinel/schemas";
 import { auditLog, auditEscalation } from "@sentinel/audit";
 import { validatePatientId, validateCallId } from "@sentinel/validation";
+import { getLaceForPatient } from "@sentinel/lace";
 import { evaluateProtocol } from "./evaluator";
 
 // ─── AWS clients ──────────────────────────────────────────────────────────────
@@ -50,8 +51,21 @@ export const handler = async (
   }
 
   const protocol = protocolResponse.Item["protocol"] as TriageProtocol;
-  const laceScore      = protocolResponse.Item["lace_score"]      as number | undefined;
-  const laceRiskLevel  = protocolResponse.Item["lace_risk_level"] as string | undefined;
+
+  // STEP 2b — Read LACE from PatientProfiles (primary source of truth).
+  // Falls back to TriageProtocols values if not yet hydrated.
+  const storedLace = await getLaceForPatient(
+    event.patientId,
+    docClient,
+    process.env["DYNAMO_TABLE_PATIENTS"] ?? "PatientProfiles"
+  );
+
+  const laceScore      = storedLace?.totalScore
+    ?? (protocolResponse.Item["lace_score"]      as number | undefined);
+  const laceRiskLevel  = storedLace?.riskLevel
+    ?? (protocolResponse.Item["lace_risk_level"] as string | undefined);
+  const laceComponents = storedLace?.components
+    ?? (protocolResponse.Item["lace_components"] as { L: number; A: number; C: number; E: number } | undefined);
 
   // STEP 3 — Load PatientAnswers from CallResults
   const callResponse = await docClient.send(
@@ -69,6 +83,30 @@ export const handler = async (
   }
 
   const answers = callResponse.Item as unknown as PatientAnswers;
+
+  // STEP 3b — Enforce flag_color from ClinicalRules (runtime safety net)
+  const conditionCode = callResponse.Item["condition_code"] as string | undefined;
+  if (conditionCode) {
+    const ruleResponse = await docClient.send(
+      new GetCommand({
+        TableName: process.env["DYNAMO_TABLE_RULES"] ?? "ClinicalRules",
+        Key: { condition_code: conditionCode },
+      })
+    );
+    const clinicalRule = ruleResponse.Item;
+    if (clinicalRule?.["conditions"] && protocol.root_node?.conditions) {
+      const ruleConditions = clinicalRule["conditions"] as Record<string, unknown>[];
+      (protocol.root_node as Record<string, unknown>)["conditions"] =
+        (protocol.root_node.conditions as Record<string, unknown>[]).map((condition) => {
+          if (condition["flag_color"]) return condition;
+          const matched = ruleConditions.find((c) => c["variable"] === condition["variable"]);
+          return { ...condition, flag_color: matched?.["flag_color"] ?? "YELLOW" };
+        });
+    }
+    if (clinicalRule?.["flag_color"]) {
+      (protocol as Record<string, unknown>)["flag_color"] = clinicalRule["flag_color"];
+    }
+  }
 
   // STEP 4 — Run triage engine
   const triageResult = evaluateProtocol(protocol, answers, laceRiskLevel);
@@ -108,6 +146,7 @@ export const handler = async (
         "    incomplete_reason    = :ir",
         "    lace_score           = :ls",
         "    lace_risk_level      = :lr",
+        "    lace_components      = :lc",
         "    triage_completed_at  = :tc",
         "    nurse_acknowledged   = :na",
       ].join(", "),
@@ -121,6 +160,7 @@ export const handler = async (
         ":ir": triageResult.incompleteReason ?? null,
         ":ls": laceScore ?? 0,
         ":lr": laceRiskLevel ?? "UNKNOWN",
+        ":lc": laceComponents ?? null,
         ":tc": new Date().toISOString(),
         ":na": false,
       },

@@ -1,8 +1,10 @@
 import * as dotenv from "dotenv";
 import * as path from "path";
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { marshall } from "@aws-sdk/util-dynamodb";
 import { type DashboardPayload } from "@sentinel/schemas";
+import { getLaceForPatient } from "@sentinel/lace";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -15,13 +17,19 @@ function makeClient(): DynamoDBClient {
   });
 }
 
+function makeDocClient(raw: DynamoDBClient): DynamoDBDocumentClient {
+  return DynamoDBDocumentClient.from(raw);
+}
+
 function table(): string {
   return process.env["DYNAMO_TABLE_RESULTS"] ?? "CallResults";
 }
 
+function patientsTable(): string {
+  return process.env["DYNAMO_TABLE_PATIENTS"] ?? "PatientProfiles";
+}
+
 // ─── Extended record type ──────────────────────────────────────────────────────
-// DashboardPayload + call_timestamp + patient answer variables (needed by
-// the triage engine evaluator which reads variables from CallResults).
 
 type ExtractedVariable = { value: number | boolean | string; confidence: number };
 
@@ -29,11 +37,14 @@ type CallResultRecord = DashboardPayload & {
   call_timestamp: string;
   variables: Record<string, ExtractedVariable>;
   unresolved_variables: string[];
+  lace_score?: number;
+  lace_risk_level?: string;
+  lace_components?: { L: number; A: number; C: number; E: number };
 };
 
-// ─── Demo records ─────────────────────────────────────────────────────────────
+// ─── Static demo records (LACE filled in at runtime from PatientProfiles) ────
 
-const records: CallResultRecord[] = [
+const BASE_RECORDS: Omit<CallResultRecord, "lace_score" | "lace_risk_level" | "lace_components">[] = [
   {
     call_id: "C001",
     patient_id: "P001",
@@ -117,34 +128,10 @@ const records: CallResultRecord[] = [
     },
     unresolved_variables: [],
   },
-  {
-    call_id: "C004",
-    patient_id: "P004",
-    triage_status: "RED",
-    broken_rules: ["antibiotic_taken == false", "fever >= 101"],
-    weighted_score: 0.88,
-    sbar_summary:
-      "S: Patient has not taken prescribed antibiotics and reports fever of 101.5F. B: 58yo male with pneumonia discharged yesterday per Dr. Ahmed Hassan. A: Antibiotic non-adherence and persistent fever indicate treatment failure risk per IDSA/ATS CAP Guidelines. R: Immediate nurse callback required. Assess need for alternative antibiotic regimen or readmission.",
-    transcript_warnings: [],
-    nurse_acknowledged: false,
-    acknowledged_by: null,
-    acknowledged_at: null,
-    call_status: "COMPLETE",
-    escalation_triggered: true,
-    protocol_source: "validated_library",
-    condition_code: "J18.9",
-    call_timestamp: "2026-03-08T15:15:00Z",
-    // fever >= 101 (w=0.85) + antibiotic_taken == false (w=0.9) → score 1.75 >= threshold 0.8 → RED
-    variables: {
-      shortness_of_breath:  { value: false,  confidence: 0.90 },
-      fever:                { value: 102,   confidence: 0.95 },
-      antibiotic_taken:     { value: false,  confidence: 0.95 },
-      confusion:            { value: false,  confidence: 0.90 },
-      appetite:             { value: true,   confidence: 0.90 },
-      mobility:             { value: true,   confidence: 0.90 },
-    },
-    unresolved_variables: [],
-  },
+  // P004 is intentionally excluded —
+  // protocol is PENDING_REVIEW.
+  // No call result should exist until
+  // the protocol is approved by a clinician.
   {
     call_id: "C005",
     patient_id: "P005",
@@ -211,23 +198,51 @@ const records: CallResultRecord[] = [
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const client = makeClient();
+  const raw = makeClient();
+  const docClient = makeDocClient(raw);
 
   console.log("Seeding demo call results (idempotent)...\n");
+  console.log("Reading LACE from PatientProfiles...");
+
+  const records: CallResultRecord[] = [];
+
+  for (const base of BASE_RECORDS) {
+    const patientId = base.patient_id;
+    const stored = await getLaceForPatient(patientId, docClient, patientsTable());
+
+    if (stored) {
+      console.log(
+        `  ${patientId}: LACE ${stored.totalScore} ${stored.riskLevel} (from PatientProfiles)`
+      );
+    } else {
+      console.warn(
+        `  ⚠ ${patientId}: No LACE in PatientProfiles — using defaults. Run lace:hydrate first.`
+      );
+    }
+
+    records.push({
+      ...base,
+      lace_score:      stored?.totalScore ?? 0,
+      lace_risk_level: stored?.riskLevel  ?? "UNKNOWN",
+      ...(stored ? { lace_components: stored.components } : {}),
+    });
+  }
+
+  console.log();
 
   for (const record of records) {
-    await client.send(
+    await raw.send(
       new PutItemCommand({
         TableName: table(),
         Item: marshall(record, { removeUndefinedValues: true }),
       })
     );
     console.log(
-      `[PUT] ${record.call_id} | ${record.patient_id} | ${record.triage_status}`
+      `[PUT] ${record.call_id} | ${record.patient_id} | ${record.triage_status} | LACE ${record.lace_score ?? 0} ${record.lace_risk_level ?? "UNKNOWN"}`
     );
   }
 
-  console.log("\nAll 6 demo call results written.");
+  console.log("\nAll 5 demo call results written (P004 excluded — protocol pending review).");
 }
 
 main().catch((err: unknown) => {

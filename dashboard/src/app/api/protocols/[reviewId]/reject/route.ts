@@ -81,9 +81,25 @@ export async function POST(
       `[AUDIT] PROTOCOL_REJECTED patient=${patientId} reviewId=${reviewId} by=${reviewedBy} reason=${rejectionReason.trim()}`
     );
 
+    // Inject required env vars for care planner when called from Next.js context
+    process.env.DYNAMO_ENDPOINT = process.env.DYNAMO_ENDPOINT || "http://localhost:8000";
+    process.env.AWS_REGION = process.env.AWS_REGION || "us-east-1";
+    process.env.FHIR_BASE_URL = process.env.FHIR_BASE_URL || "http://localhost:8080/fhir";
+    process.env.DYNAMO_TABLE_PROTOCOLS = process.env.DYNAMO_TABLE_PROTOCOLS || "TriageProtocols";
+    process.env.DYNAMO_TABLE_REVIEWS = process.env.DYNAMO_TABLE_REVIEWS || "ProtocolReview";
+    process.env.DYNAMO_TABLE_RULES = process.env.DYNAMO_TABLE_RULES || "ClinicalRules";
+    process.env.BEDROCK_MODEL_CARE_PLANNER = process.env.BEDROCK_MODEL_CARE_PLANNER || "amazon.nova-lite-v1:0";
+    process.env.POLLY_ENABLED = process.env.POLLY_ENABLED || "false";
+    process.env.S3_BUCKET = process.env.S3_BUCKET || "sentinel-audio-629843009128";
+    process.env.CONFIDENCE_THRESHOLD = process.env.CONFIDENCE_THRESHOLD || "0.7";
+    process.env.ESCALATION_TOPIC_ARN = process.env.ESCALATION_TOPIC_ARN || "arn:aws:sns:us-east-1:629843009128:sentinel-red-escalation";
+
     // STEP 2 — Trigger Care Planner to regenerate (rejection must succeed even if this fails)
+    let regenerationResult: CarePlannerResult | undefined;
+    let regenerationError: string | undefined;
+
     try {
-      const regenerationResult = (await carePlannerHandler({
+      regenerationResult = (await carePlannerHandler({
         patientId,
         regeneration: {
           previousReviewId: reviewId,
@@ -92,24 +108,13 @@ export async function POST(
           reviewedBy,
         },
       })) as CarePlannerResult;
+      console.log("[REGENERATION] Success — newReviewId:", regenerationResult?.newReviewId);
+    } catch (err) {
+      console.error("[REGENERATION] FULL ERROR:", err);
+      regenerationError = err instanceof Error ? err.message : String(err);
+    }
 
-      const newReviewId = regenerationResult.newReviewId ?? null;
-
-      return NextResponse.json({
-        success: true,
-        reviewId,
-        patientId,
-        status: "REJECTED",
-        regenerationTriggered: true,
-        newReviewId,
-        message: "Protocol rejected and regeneration triggered. New protocol is pending review.",
-      });
-    } catch (regenErr) {
-      console.error(
-        `[REGEN_FAILED] Care planner regeneration failed for patient=${patientId} reviewId=${reviewId}:`,
-        regenErr
-      );
-
+    if (regenerationError !== undefined) {
       return NextResponse.json({
         success: true,
         reviewId,
@@ -120,6 +125,16 @@ export async function POST(
         message: "Protocol rejected. Regeneration failed — please contact the care team.",
       });
     }
+
+    return NextResponse.json({
+      success: true,
+      reviewId,
+      patientId,
+      status: "REJECTED",
+      regenerationTriggered: true,
+      newReviewId: regenerationResult?.newReviewId ?? null,
+      message: "Protocol rejected and regeneration triggered. New protocol is pending review.",
+    });
   } catch (err) {
     console.error(`POST /api/protocols/${params.reviewId}/reject error:`, err);
     return NextResponse.json(

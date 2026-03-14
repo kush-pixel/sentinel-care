@@ -5,8 +5,8 @@ dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { getLaceForPatient, calculateLaceScore } from "@sentinel/lace";
 import { TriageProtocol } from "@sentinel/schemas";
-import { calculateLaceScore } from "@sentinel/lace";
 import {
   getFullPatientRecord,
   getPatientEncounterSummary,
@@ -72,28 +72,74 @@ export const handler = async (
 
   auditDataAccess(event.patientId, "CARE_PLANNER", "FHIR patient record loaded");
 
-  // STEP 3 — Calculate LACE score
-  const dischargeDateExt = patientRecord.patient.extension?.find(
-    (e) => e.url === "discharge-date"
-  )?.valueDate ?? new Date().toISOString().slice(0, 10);
-
-  const encounterSummary = await getPatientEncounterSummary(
-    event.patientId,
-    dischargeDateExt
-  );
-
+  // STEP 3 — Get LACE score (PatientProfiles first, FHIR fallback)
   const conditionCodes = patientRecord.conditions
     .flatMap((c) => c.code.coding)
     .map((coding) => coding.code)
     .filter((code): code is string => !!code);
 
-  const laceResult = calculateLaceScore({
-    admissionDate: encounterSummary.admissionDate,
-    dischargeDate: encounterSummary.dischargeDate,
-    admissionType: encounterSummary.admissionType,
-    conditionCodes,
-    recentEDVisits: encounterSummary.recentEDVisits,
-  });
+  // Create dynamo client here so STEP 13 can reuse it
+  const dynamo = makeDynamo();
+  const patientsTable  = process.env["DYNAMO_TABLE_PATIENTS"]  ?? "PatientProfiles";
+
+  const storedLace = await getLaceForPatient(event.patientId, dynamo, patientsTable);
+
+  let laceResult: NonNullable<Awaited<ReturnType<typeof getLaceForPatient>>>;
+
+  if (storedLace) {
+    laceResult = storedLace;
+    console.log(
+      `[LACE] PatientProfiles: score=${laceResult.totalScore} risk=${laceResult.riskLevel}`
+    );
+  } else {
+    // Fall back to FHIR calculation
+    const dischargeDateExt = patientRecord.patient.extension?.find(
+      (e) => e.url === "discharge-date"
+    )?.valueDate ?? new Date().toISOString().slice(0, 10);
+
+    const encounterSummary = await getPatientEncounterSummary(
+      event.patientId,
+      dischargeDateExt
+    );
+
+    laceResult = calculateLaceScore({
+      admissionDate: encounterSummary.admissionDate,
+      dischargeDate: encounterSummary.dischargeDate,
+      admissionType: encounterSummary.admissionType,
+      conditionCodes,
+      recentEDVisits: encounterSummary.recentEDVisits,
+    });
+
+    // Store in PatientProfiles so future runs skip FHIR
+    const calculatedAt = new Date().toISOString();
+    await dynamo.send(
+      new UpdateCommand({
+        TableName: patientsTable,
+        Key: { patient_id: event.patientId },
+        UpdateExpression: [
+          "SET lace_score               = :ls",
+          "    lace_risk_level          = :lr",
+          "    lace_components          = :lc",
+          "    lace_length_of_stay_days = :ld",
+          "    lace_charlson_score      = :cs",
+          "    lace_interpretation      = :li",
+          "    lace_calculated_at       = :la",
+        ].join(", "),
+        ExpressionAttributeValues: {
+          ":ls": laceResult.totalScore,
+          ":lr": laceResult.riskLevel,
+          ":lc": laceResult.components,
+          ":ld": laceResult.lengthOfStayDays,
+          ":cs": laceResult.charlsonScore,
+          ":li": laceResult.interpretation,
+          ":la": calculatedAt,
+        },
+      })
+    );
+    console.log(
+      `[LACE] Calculated from FHIR and stored in PatientProfiles: score=${laceResult.totalScore}`
+    );
+  }
 
   // STEP 4 — Load clinical rules
   const rules = await getRulesForPatient(conditionCodes);
@@ -212,21 +258,48 @@ export const handler = async (
   });
 
   // STEP 11 — Determine status
-  const status = confidenceResult.autoApprove ? "AUTO_APPROVED" : "PENDING_REVIEW";
-  const auto_approval_reason = confidenceResult.autoApprove
-    ? confidenceResult.reasons.join(". ")
-    : null;
-  const pending_reason = !confidenceResult.autoApprove
-    ? confidenceResult.reasons.join(". ")
-    : null;
+  // Regenerated protocols ALWAYS go to PENDING_REVIEW regardless of confidence score,
+  // so the nurse can verify their feedback was addressed.
+  let status: "AUTO_APPROVED" | "PENDING_REVIEW";
+  let auto_approval_reason: string | null;
+  let pending_reason: string | null;
+
+  if (event.regeneration) {
+    status = "PENDING_REVIEW";
+    auto_approval_reason = null;
+    pending_reason = `↻ REVISED PROTOCOL — Regenerated protocol awaiting clinical verification. Previous rejection reason: "${event.regeneration.rejectionReason}". Please verify the feedback has been addressed.`;
+  } else {
+    status = confidenceResult.autoApprove ? "AUTO_APPROVED" : "PENDING_REVIEW";
+    auto_approval_reason = confidenceResult.autoApprove
+      ? confidenceResult.reasons.join(". ")
+      : null;
+    pending_reason = !confidenceResult.autoApprove
+      ? confidenceResult.reasons.join(". ")
+      : null;
+  }
 
   // STEP 12 — Generate review ID (use REGEN suffix when regenerating)
   const reviewId = event.regeneration
     ? `REV-${event.patientId}-REGEN-${Date.now()}`
     : `REV-${event.patientId}-${Date.now()}`;
 
+  // STEP 12b — Enforce flag_color from clinical rules before saving
+  if (rules.length > 0 && protocol.root_node?.conditions) {
+    const clinicalRule = rules[0];
+    (protocol.root_node as Record<string, unknown>)["conditions"] =
+      (protocol.root_node.conditions as Record<string, unknown>[]).map((condition) => {
+        const matched = clinicalRule.conditions.find(
+          (c) => c.variable === (condition as Record<string, unknown>)["variable"]
+        );
+        return {
+          ...condition,
+          flag_color: matched?.flag_color ?? (condition as Record<string, unknown>)["flag_color"] ?? "YELLOW",
+        };
+      });
+    (protocol as Record<string, unknown>)["flag_color"] = clinicalRule.flag_color;
+  }
+
   // STEP 13 — Save to ProtocolReview
-  const dynamo = makeDynamo();
   const protocolsTable = process.env["DYNAMO_TABLE_PROTOCOLS"] ?? "TriageProtocols";
   const reviewsTable = process.env["DYNAMO_TABLE_REVIEWS"] ?? "ProtocolReview";
   const now = new Date().toISOString();
@@ -268,6 +341,7 @@ export const handler = async (
         lace_score: laceResult.totalScore,
         lace_risk_level: laceResult.riskLevel,
         lace_interpretation: laceResult.interpretation,
+        lace_components: laceResult.components,
         rejection_reason: null,
         reviewed_by: status === "AUTO_APPROVED" ? "SYSTEM" : null,
         reviewed_at: status === "AUTO_APPROVED" ? now : null,

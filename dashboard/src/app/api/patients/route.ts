@@ -118,15 +118,31 @@ export async function GET(): Promise<NextResponse> {
 
   try {
     const table = process.env.DYNAMO_TABLE_RESULTS ?? "CallResults";
-    const result = await docClient.send(
-      new ScanCommand({ TableName: table })
-    );
+    const reviewsTable = process.env.DYNAMO_TABLE_REVIEWS ?? "ProtocolReview";
 
-    const items = result.Items ?? [];
-    const patients = items
-      .map((item) => mapItem(item as Record<string, unknown>))
+    // Load CallResults and ProtocolReview in parallel
+    const [result, reviewsResult] = await Promise.all([
+      docClient.send(new ScanCommand({ TableName: table })),
+      docClient.send(new ScanCommand({ TableName: reviewsTable })),
+    ]);
+
+    // STEP 1 — Build patientId → review status map
+    const reviewStatusMap = new Map<string, string>();
+    for (const review of reviewsResult.Items ?? []) {
+      const pid = review["patient_id"] as string | undefined;
+      const status = review["status"] as string | undefined;
+      if (pid && status) reviewStatusMap.set(pid, status);
+    }
+
+    // STEP 2 — Map items and filter out PENDING_REVIEW patients
+    const allPatients = (result.Items ?? []).map((item) =>
+      mapItem(item as Record<string, unknown>)
+    );
+    const patients = allPatients
+      .filter((p) => reviewStatusMap.get(p.patientId) !== "PENDING_REVIEW")
       .sort((a, b) => urgencyPriority(a) - urgencyPriority(b));
 
+    // STEP 3 — Recalculate stats from filtered list
     const stats: DashboardStats = {
       total: patients.length,
       red: patients.filter((p) => p.triageStatus === "RED").length,
@@ -137,7 +153,12 @@ export async function GET(): Promise<NextResponse> {
       pending: patients.filter((p) => !p.nurseAcknowledged).length,
     };
 
-    return NextResponse.json({ patients, stats });
+    // STEP 4 — Count patients currently blocked by PENDING_REVIEW
+    const pendingProtocolCount = Array.from(reviewStatusMap.values()).filter(
+      (s) => s === "PENDING_REVIEW"
+    ).length;
+
+    return NextResponse.json({ patients, stats, pendingProtocolCount });
   } catch (err) {
     console.error("GET /api/patients error:", err);
     return NextResponse.json(

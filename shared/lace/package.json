@@ -8,6 +8,10 @@
     "test": "jest --coverage",
     "build": "tsc --noEmit"
   },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0"
+  },
   "devDependencies": {
     "@types/jest": "*",
     "@types/node": "*",
