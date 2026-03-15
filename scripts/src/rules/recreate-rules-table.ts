@@ -40,13 +40,12 @@ export async function recreateRulesTable(): Promise<void> {
   // STEP 1 — Delete existing table (skip if not found)
   try {
     await client.send(new DeleteTableCommand({ TableName: table }));
-    console.log(`Deleting table ${table}...`);
-    // DynamoDB Local deletion is synchronous — brief pause for consistency
-    await wait(500);
+    console.log(`Deleted existing ${table} table`);
+    // Wait for deletion
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("ResourceNotFoundException")) {
-      console.log(`Table ${table} does not exist — creating fresh.`);
+    if ((err as { name?: string }).name === "ResourceNotFoundException") {
+      console.log(`${table} table does not exist yet — skipping deletion`);
     } else {
       throw err;
     }

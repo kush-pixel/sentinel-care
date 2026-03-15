@@ -30,6 +30,7 @@
     "seed:uuid-demo": "ts-node src/test-uuid-patient/seed-uuid-demo.ts",
     "cleanup:uuid-demo": "ts-node src/test-uuid-patient/cleanup-uuid-demo.ts",
     "setup:kvs": "ts-node src/infrastructure/setup-kvs.ts",
+    "deploy:lambdas": "ts-node src/infrastructure/deploy-lambdas.ts",
     "seed:all": "npm run seed:fhir && npm run seed:encounters && npm run seed:rules && npm run lace:hydrate && npm run seed:demo && npm run seed:reviews",
     "lace": "ts-node src/lace/calculate-all.ts",
     "verify": "ts-node src/verify.ts",
@@ -47,13 +48,16 @@
     "@sentinel/schemas": "*",
     "@sentinel/types": "*",
     "@types/node-fetch": "^2.6.13",
+    "archiver": "^7.0.1",
     "dotenv": "^16.4.1",
     "node-fetch": "^2.7.0",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
     "@types/node": "*",
+    "esbuild": "^0.24.0",
     "typescript": "*"
   }
 }

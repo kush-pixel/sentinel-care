@@ -13,7 +13,6 @@ import * as fs from "fs";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-process.env["DYNAMO_ENDPOINT"]            = process.env["DYNAMO_ENDPOINT"]            ?? "http://localhost:8000";
 process.env["AWS_REGION"]                 = process.env["AWS_REGION"]                 ?? "us-east-1";
 process.env["FHIR_BASE_URL"]              = process.env["FHIR_BASE_URL"]              ?? "http://localhost:8080/fhir";
 process.env["DYNAMO_TABLE_PROTOCOLS"]     = process.env["DYNAMO_TABLE_PROTOCOLS"]     ?? "TriageProtocols";
@@ -52,7 +51,7 @@ const SEP = "──────────────────────�
 function makeDynamo(): DynamoDBDocumentClient {
   const raw = new DynamoDBClient({
     region:   process.env["AWS_REGION"]      ?? "us-east-1",
-    endpoint: process.env["DYNAMO_ENDPOINT"] ?? "http://localhost:8000",
+    ...(process.env["DYNAMO_ENDPOINT"] && { endpoint: process.env["DYNAMO_ENDPOINT"] }),
   });
   return DynamoDBDocumentClient.from(raw);
 }

@@ -1,0 +1,1 @@
+{"statusCode":200,"callId":"C001","patientId":"P001","triageStatus":"RED","sbarGenerated":true,"sbarLength":626,"guidelineSource":"AHA/ACC 2022 Heart Failure Guidelines","escalationTriggered":true,"usedFallback":false}
