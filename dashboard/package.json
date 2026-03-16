@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "rimraf .next",
     "dev": "next dev --port 3000",
+    "prebuild": "rimraf .next",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "next lint"

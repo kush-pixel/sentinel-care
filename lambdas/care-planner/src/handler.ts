@@ -281,14 +281,14 @@ export const handler = async (
       zodValidationPassed = true;
       usedFallback = false;
     } else {
-      console.log(
-        "Zod validation failed:",
+      console.warn(
+        "[care-planner] Zod validation failed:",
         parseResult.error.issues.length,
         "issues"
       );
     }
   } else {
-    console.log("JSON parse failed:", bedrockResult.parseError);
+    console.warn("[care-planner] JSON parse failed:", bedrockResult.parseError);
   }
 
   // STEP 10 — Score confidence

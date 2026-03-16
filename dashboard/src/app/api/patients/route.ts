@@ -4,6 +4,24 @@ import { docClient } from "@/lib/dynamo";
 import { checkRateLimit } from "@/lib/rate-limit";
 import type { PatientRecord, DashboardStats } from "@/lib/types";
 
+// ─── Rule → natural language ─────────────────────────────────────────────────
+
+function ruleToNatural(rule: string): string {
+  const m = rule.match(/^(\S+)\s*(>=|<=|>|<|==)\s*(.+)$/);
+  if (!m) return rule;
+  const [, varRaw, op, threshRaw] = m;
+  const varName = varRaw.replace(/_/g, " ");
+  const threshold = threshRaw.trim();
+  if (threshold === "true")  return `${varName} is present`;
+  if (threshold === "false") return `${varName} is absent`;
+  const opText =
+    op === ">=" ? "is at least" :
+    op === ">"  ? "exceeds"     :
+    op === "<=" ? "is at most"  :
+    op === "<"  ? "is below"    : "is";
+  return `${varName} ${opText} ${threshold}`;
+}
+
 // ─── Urgency sort priority ────────────────────────────────────────────────────
 
 function urgencyPriority(p: PatientRecord): number {
@@ -22,11 +40,12 @@ function mapItem(item: Record<string, unknown>): PatientRecord {
   const rawBrokenRules = item.broken_rules;
   let brokenRules: string[] = [];
   if (Array.isArray(rawBrokenRules)) {
-    brokenRules = rawBrokenRules.map((r) =>
-      typeof r === "object" && r !== null && "S" in r
+    brokenRules = rawBrokenRules.map((r) => {
+      const raw = typeof r === "object" && r !== null && "S" in r
         ? String((r as { S: string }).S)
-        : String(r)
-    );
+        : String(r);
+      return ruleToNatural(raw);
+    });
   }
 
   const laceResult = item.lace_result as
