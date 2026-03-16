@@ -111,13 +111,16 @@ function buildEnglishQuestion(ctx: QuestionContext): string {
       return "Are you able to move around and get out of bed as expected?";
 
     case "appetite":
-      return "Have you been eating normally? Have you had a good appetite?";
+      return "Have you had any loss of appetite or trouble eating since leaving hospital?";
 
     case "dizziness":
       return "Have you felt dizzy, lightheaded, or unsteady on your feet?";
 
     case "swelling":
       return "Have you noticed any swelling in your legs, ankles, or feet?";
+
+    case "ankle_swelling":
+      return "Have you noticed any swelling in your ankles or feet?";
 
     case "wound_drainage":
       return (
@@ -238,13 +241,16 @@ function buildSpanishQuestion(ctx: QuestionContext): string {
       return "¿Puede moverse y levantarse de la cama según lo esperado?";
 
     case "appetite":
-      return "¿Ha estado comiendo normalmente? ¿Ha tenido buen apetito?";
+      return "¿Ha tenido falta de apetito o dificultad para comer desde que salió del hospital?";
 
     case "dizziness":
       return "¿Se ha sentido mareado, aturdido o inestable?";
 
     case "swelling":
       return "¿Ha notado hinchazón en las piernas, tobillos o pies?";
+
+    case "ankle_swelling":
+      return "¿Ha notado hinchazón en los tobillos o pies?";
 
     case "wound_drainage":
       return "¿Ha notado drenaje, enrojecimiento o secreción inusual en su herida o incisión?";

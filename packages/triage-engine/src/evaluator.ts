@@ -157,9 +157,10 @@ export function evaluateProtocol(
   laceRiskLevel?: string
 ): TriageResult {
   // ── Stage 1: hard completeness stop ─────────────────────────────────────
-  const isHardIncomplete =
-    answers.call_status === "INCOMPLETE" ||
-    answers.unresolved_variables.length > 0;
+  // Only trigger on call_status=INCOMPLETE (call was dropped/never connected).
+  // Unresolved variables (asked but unanswered) are handled by the LACE skip
+  // threshold in Stage 2 — they count as skipped variables there.
+  const isHardIncomplete = answers.call_status === "INCOMPLETE";
 
   if (isHardIncomplete) {
     const nodeResult = evaluateNode(protocol.root_node, answers.variables);

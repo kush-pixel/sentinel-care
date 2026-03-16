@@ -25,6 +25,10 @@ import {
   DescribeBotLocaleCommand,
   CreateBotVersionCommand,
   DescribeBotVersionCommand,
+  ListSlotsCommand,
+  CreateSlotCommand,
+  UpdateSlotCommand,
+  ListSlotTypesCommand,
 } from "@aws-sdk/client-lex-models-v2";
 import {
   LambdaClient,
@@ -277,6 +281,124 @@ async function updateAliasVersion(lex: LexModelsV2Client, botVersion: string): P
   console.log(`  ✓ Alias ${ALIAS_NAME} updated to version ${botVersion}`);
 }
 
+// ─── Step 3c — Create/update 'answer' slot with reduced audio timeouts ───────
+// startTimeoutMs: 2500 — give patients enough time to process the question and start
+//                        speaking; 1000ms is too short and causes Lex to time out
+//                        before the patient begins, resulting in blank transcripts
+//                        and skipped questions on outbound calls.
+// endTimeoutMs:   2000 — patient responses are short; cut off silence quickly
+
+async function ensureAnswerSlotWithTimeout(lex: LexModelsV2Client): Promise<void> {
+  // Resolve PatientFollowUp intentId
+  let intentId: string | undefined;
+  let intentToken: string | undefined;
+  do {
+    const list = await lex.send(new ListIntentsCommand({
+      botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID,
+      ...(intentToken && { nextToken: intentToken }),
+    }));
+    const found = (list.intentSummaries ?? []).find(i => i.intentName === INTENT_NAME);
+    if (found?.intentId) { intentId = found.intentId; break; }
+    intentToken = list.nextToken;
+  } while (intentToken);
+  if (!intentId) throw new Error(`Intent "${INTENT_NAME}" not found`);
+
+  // Resolve AMAZON.FreeFormInput slot type ID
+  let freeFormSlotTypeId: string | undefined;
+  let nextToken: string | undefined;
+  do {
+    const stList = await lex.send(new ListSlotTypesCommand({
+      botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID,
+      ...(nextToken && { nextToken }),
+    }));
+    const found = (stList.slotTypeSummaries ?? []).find(
+      st => st.slotTypeName === "AMAZON.FreeFormInput",
+    );
+    if (found?.slotTypeId) { freeFormSlotTypeId = found.slotTypeId; break; }
+    nextToken = stList.nextToken;
+  } while (nextToken);
+
+  // The built-in AMAZON.FreeFormInput has a fixed ARN used as slotTypeId in Lex v2
+  const slotTypeId = freeFormSlotTypeId ?? "AMAZON.FreeFormInput";
+
+  const elicitationSetting = {
+    slotConstraint: "Optional" as const,
+    promptSpecification: {
+      messageGroups: [{
+        message: { plainTextMessage: { value: "Please respond." } },
+      }],
+      maxRetries:       2,
+      allowInterrupt:   true,
+      promptAttemptsSpecification: {
+        Initial: {
+          allowInterrupt:    true,
+          allowedInputTypes: { allowAudioInput: true, allowDTMFInput: false },
+          audioAndDTMFInputSpecification: {
+            startTimeoutMs: 2500,
+            audioSpecification: { endTimeoutMs: 2000, maxLengthMs: 15000 },
+          },
+        },
+        Retry1: {
+          allowInterrupt:    true,
+          allowedInputTypes: { allowAudioInput: true, allowDTMFInput: false },
+          audioAndDTMFInputSpecification: {
+            startTimeoutMs: 2500,
+            audioSpecification: { endTimeoutMs: 2000, maxLengthMs: 15000 },
+          },
+        },
+      },
+    },
+  };
+
+  // Check if 'answer' slot already exists
+  const slotList = await lex.send(new ListSlotsCommand({
+    botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID, intentId,
+  }));
+  const existingSlot = (slotList.slotSummaries ?? []).find(s => s.slotName === "answer");
+
+  let slotId: string;
+  if (existingSlot?.slotId) {
+    await lex.send(new UpdateSlotCommand({
+      botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID,
+      intentId, slotId: existingSlot.slotId,
+      slotName:                "answer",
+      slotTypeId,
+      valueElicitationSetting: elicitationSetting,
+    }));
+    slotId = existingSlot.slotId;
+    console.log("  ✓ 'answer' slot updated — startTimeoutMs: 2500, endTimeoutMs: 2000");
+  } else {
+    const created = await lex.send(new CreateSlotCommand({
+      botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID,
+      intentId,
+      slotName:                "answer",
+      slotTypeId,
+      valueElicitationSetting: elicitationSetting,
+    }));
+    if (!created.slotId) throw new Error("CreateSlot returned no slotId");
+    slotId = created.slotId;
+    console.log("  ✓ 'answer' slot created — startTimeoutMs: 2500, endTimeoutMs: 2000");
+  }
+
+  // Lex requires every slot to have a declared priority on the intent — set priority 1
+  const intentDesc = await lex.send(new DescribeIntentCommand({
+    botId: BOT_ID, botVersion: "DRAFT", localeId: LOCALE_ID, intentId,
+  }));
+  await lex.send(new UpdateIntentCommand({
+    botId:            BOT_ID,
+    botVersion:       "DRAFT",
+    localeId:         LOCALE_ID,
+    intentId,
+    intentName:       INTENT_NAME,
+    description:      intentDesc.description,
+    sampleUtterances: intentDesc.sampleUtterances,
+    dialogCodeHook:   { enabled: true },
+    fulfillmentCodeHook: { enabled: false, postFulfillmentStatusSpecification: {} },
+    slotPriorities:   [{ priority: 1, slotId }],
+  }));
+  console.log("  ✓ Intent slot priorities set");
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -305,6 +427,10 @@ async function main(): Promise<void> {
   // Step 3b — Enable dialog code hook on FallbackIntent
   console.log("\nSTEP 3b — Enabling dialogCodeHook on FallbackIntent...");
   await enableFallbackCodeHook(lex);
+
+  // Step 3c — Create/update 'answer' slot with 1s/2.5s audio timeouts (reduced from 6s default)
+  console.log("\nSTEP 3c — Configuring 'answer' slot audio timeouts...");
+  await ensureAnswerSlotWithTimeout(lex);
 
   // Step 4 — Rebuild locale
   console.log("\nSTEP 4 — Rebuilding bot locale...");

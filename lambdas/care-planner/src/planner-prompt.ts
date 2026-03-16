@@ -62,7 +62,18 @@ HARD RULES — NEVER VIOLATE THESE:
    - condition weights (adjust for this patient's risk)
    - preferred_language
    - flag_color (based on highest risk in rules)
-4. Output ONLY valid JSON. No preamble. No explanation. No markdown. No backticks. Raw JSON only.`;
+4. Output ONLY valid JSON. No preamble. No explanation. No markdown. No backticks. Raw JSON only.
+5. question_priority MUST contain a MINIMUM of 5 variables. Never generate fewer than 5 questions.
+6. weighted_threshold MUST be between 0.60 and 0.70 (inclusive). NEVER set it higher than 0.70.
+7. Weight assignment guidelines (condition-specific risk only):
+   - Critical symptoms (acute deterioration, hospitalization risk): 0.85 - 0.95
+   - Significant symptoms (treatment adherence, major indicators): 0.70 - 0.85
+   - Monitoring symptoms (routine follow-up, secondary indicators): 0.55 - 0.70
+8. Every question MUST be specific to the patient's primary condition (ICD-10 code). Do NOT include questions for unrelated conditions.
+9. EVERY condition in the conditions array MUST include a flag_color field:
+   - flag_color: "RED" for weight >= 0.80 (urgent, potentially life-threatening)
+   - flag_color: "YELLOW" for weight < 0.80 (significant but non-urgent monitoring)
+   Never omit flag_color from any condition. Never use null or empty string.`;
 
   // ─── Section B — Language ──────────────────────────────────────────────────
 
@@ -126,7 +137,7 @@ Generate a corrected protocol that incorporates this feedback while respecting a
   "patient_id": "<string>",
   "preferred_language": "<string>",
   "flag_color": "<GREEN | YELLOW | RED>",
-  "question_priority": ["<variable1>", "<variable2>", ...],
+  "question_priority": ["<variable1>", "<variable2>", "<variable3>", "<variable4>", "<variable5>"],
   "root_node": {
     "logic": "<AND | OR>",
     "conditions": [
@@ -134,51 +145,61 @@ Generate a corrected protocol that incorporates this feedback while respecting a
         "variable": "<string>",
         "operator": "<>= | <= | == | > | <>",
         "threshold": "<number or boolean>",
-        "weight": "<number 0.0–1.0>"
+        "weight": "<number 0.0–1.0>",
+        "flag_color": "<RED | YELLOW>"
       }
     ],
-    "weighted_threshold": "<number 0.0–1.0>"
+    "weighted_threshold": "<number 0.60–0.70>"
   }
-}`;
+}
+
+CONSTRAINT: question_priority must list AT LEAST 5 variables. weighted_threshold must be >= 0.60 and <= 0.70.`;
 
   // ─── Section F — Example output ────────────────────────────────────────────
 
-  const sectionF = `EXAMPLE OUTPUT (CHF patient — shows the correct JSON structure):
+  const sectionF = `EXAMPLE OUTPUT (CHF patient I50.9 — shows correct structure with 5+ questions, weights, and threshold 0.60-0.70):
 {
   "patient_id": "P001",
   "preferred_language": "en",
   "flag_color": "RED",
-  "question_priority": ["weight_gain_lbs", "shortness_of_breath", "lasix_filled", "ankle_swelling"],
+  "question_priority": ["weight_gain_lbs", "shortness_of_breath", "lasix_filled", "ankle_swelling", "chest_pain"],
   "root_node": {
     "logic": "OR",
     "conditions": [
-      { "variable": "weight_gain_lbs", "operator": ">=", "threshold": 3, "weight": 0.9 },
-      { "variable": "shortness_of_breath", "operator": "==", "threshold": true, "weight": 0.85 },
-      { "variable": "lasix_filled", "operator": "==", "threshold": false, "weight": 0.8 },
-      { "variable": "ankle_swelling", "operator": "==", "threshold": true, "weight": 0.7 }
+      { "variable": "weight_gain_lbs",     "operator": ">=", "threshold": 3,    "weight": 0.92, "flag_color": "RED"    },
+      { "variable": "shortness_of_breath", "operator": "==", "threshold": true, "weight": 0.88, "flag_color": "RED"    },
+      { "variable": "lasix_filled",        "operator": "==", "threshold": false,"weight": 0.80, "flag_color": "RED"    },
+      { "variable": "ankle_swelling",      "operator": "==", "threshold": true, "weight": 0.72, "flag_color": "YELLOW" },
+      { "variable": "chest_pain",          "operator": "==", "threshold": true, "weight": 0.65, "flag_color": "YELLOW" }
     ],
-    "weighted_threshold": 0.75
+    "weighted_threshold": 0.65
   }
-}`;
+}
+
+Notice: weighted_threshold = 0.65 (within 0.60-0.70). Five condition-specific CHF questions. Critical symptoms (weight gain, SOB) weighted 0.85-0.95. Monitoring symptoms weighted 0.55-0.70.`;
 
   // ─── Section G — LACE personalisation ─────────────────────────────────────
 
   let laceInstruction: string;
   if (laceResult.riskLevel === "HIGH" || laceResult.riskLevel === "VERY HIGH") {
     laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
-Prioritise the most critical safety questions first.
+Prioritise the most critical condition-specific safety questions first.
 Set flag_color to RED.
-Weight acute symptom variables above 0.8.`;
+Weight acute symptom variables 0.85-0.95.
+Generate at least 5-6 questions covering: acute symptoms, medication adherence, vital signs, functional status, and warning signs specific to this condition.`;
   } else if (laceResult.riskLevel === "MODERATE") {
     laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
-Balance urgency with routine follow-up questions.
-Set flag_color to YELLOW.`;
+Balance urgency with routine follow-up questions specific to this condition.
+Set flag_color to YELLOW.
+Generate at least 5 questions covering: key symptom monitoring, medication adherence, vital signs, and condition-specific warning signs.`;
   } else {
     laceInstruction = `Based on the LACE score of ${laceResult.totalScore} (${laceResult.riskLevel}):
-Standard follow-up protocol is appropriate.
-Set flag_color to GREEN unless a rule triggers RED.`;
+Standard follow-up protocol appropriate — still generate at least 5 condition-specific questions.
+Set flag_color to GREEN unless a rule triggers RED.
+Cover: symptom check, medication adherence, vital signs, activity tolerance, and follow-up compliance.`;
   }
   const sectionG = `${laceInstruction}
+REMINDER: weighted_threshold must be 0.60-0.70. All questions must be specific to the patient's condition.
 Remember: use only the threshold values provided above.`;
 
   // ─── Section H — Final instruction ────────────────────────────────────────

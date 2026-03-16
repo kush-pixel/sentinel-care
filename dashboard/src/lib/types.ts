@@ -1,6 +1,7 @@
 export interface PatientRecord {
   callId: string;
   patientId: string;
+  patientName?: string;
   triageStatus: "RED" | "YELLOW" | "GREEN" | "INCOMPLETE";
   brokenRules: string[];
   weightedScore: number;

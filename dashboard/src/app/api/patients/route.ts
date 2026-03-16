@@ -122,12 +122,22 @@ export async function GET(): Promise<NextResponse> {
   try {
     const table = process.env.DYNAMO_TABLE_RESULTS ?? "CallResults";
     const reviewsTable = process.env.DYNAMO_TABLE_REVIEWS ?? "ProtocolReview";
+    const profilesTable = process.env.DYNAMO_TABLE_PATIENTS ?? "PatientProfiles";
 
-    // Load CallResults and ProtocolReview in parallel
-    const [result, reviewsResult] = await Promise.all([
+    // Load CallResults, ProtocolReview, and PatientProfiles in parallel
+    const [result, reviewsResult, profilesResult] = await Promise.all([
       docClient.send(new ScanCommand({ TableName: table })),
       docClient.send(new ScanCommand({ TableName: reviewsTable })),
+      docClient.send(new ScanCommand({ TableName: profilesTable })),
     ]);
+
+    // STEP 0 — Build patientId → patient_name map from PatientProfiles
+    const patientNameMap = new Map<string, string>();
+    for (const profile of profilesResult.Items ?? []) {
+      const pid  = profile["patient_id"] as string | undefined;
+      const name = profile["patient_name"] as string | undefined;
+      if (pid && name) patientNameMap.set(pid, name);
+    }
 
     // STEP 1 — Build patientId → review status map
     const reviewStatusMap = new Map<string, string>();
@@ -137,10 +147,11 @@ export async function GET(): Promise<NextResponse> {
       if (pid && status) reviewStatusMap.set(pid, status);
     }
 
-    // STEP 2 — Map items: only COMPLETE calls, one per patient (most recent by call_timestamp)
-    const completeItems = (result.Items ?? []).filter(
-      (item) => (item as Record<string, unknown>)["call_status"] === "COMPLETE"
-    );
+    // STEP 2 — Map items: all finalized calls (COMPLETE or INCOMPLETE), not IN_PROGRESS
+    const completeItems = (result.Items ?? []).filter((item) => {
+      const s = (item as Record<string, unknown>)["call_status"] as string | undefined;
+      return s === "COMPLETE" || s === "INCOMPLETE";
+    });
 
     // Sort descending by call_timestamp so the first seen per patient_id is the latest
     completeItems.sort((a, b) => {
@@ -158,9 +169,13 @@ export async function GET(): Promise<NextResponse> {
       return true;
     });
 
-    const allPatients = dedupedItems.map((item) =>
-      mapItem(item as Record<string, unknown>)
-    );
+    const allPatients = dedupedItems.map((item) => {
+      const record = mapItem(item as Record<string, unknown>);
+      const name = patientNameMap.get(record.patientId)
+        ?? (item as Record<string, unknown>)["patient_name"] as string | undefined;
+      if (name) record.patientName = name;
+      return record;
+    });
     const patients = allPatients
       .filter((p) => reviewStatusMap.get(p.patientId) !== "PENDING_REVIEW")
       .sort((a, b) => urgencyPriority(a) - urgencyPriority(b));

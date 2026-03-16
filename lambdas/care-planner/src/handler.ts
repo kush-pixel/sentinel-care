@@ -4,7 +4,7 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getLaceForPatient, calculateLaceScore } from "@sentinel/lace";
 import { TriageProtocol } from "@sentinel/schemas";
 import { getLatestRule } from "@sentinel/validation";
@@ -58,6 +58,44 @@ export const handler = async (
     );
   }
 
+  // Initialise DynamoDB client and table names early so they're available
+  // for the idempotency check below and reused throughout the rest of the handler.
+  const dynamo        = makeDynamo();
+  const patientsTable  = process.env["DYNAMO_TABLE_PATIENTS"]  ?? "PatientProfiles";
+  const protocolsTable = process.env["DYNAMO_TABLE_PROTOCOLS"] ?? "TriageProtocols";
+  const reviewsTable   = process.env["DYNAMO_TABLE_REVIEWS"]   ?? "ProtocolReview";
+
+  // STEP 1c — Idempotency: skip if an active (non-rejected) review already exists.
+  // Only applies to fresh runs — regeneration requests always produce a new record.
+  if (!event.regeneration) {
+    const existing = await dynamo.send(new ScanCommand({
+      TableName: reviewsTable,
+      FilterExpression: "patient_id = :pid AND #s IN (:pending, :auto, :approved)",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":pid":      event.patientId,
+        ":pending":  "PENDING_REVIEW",
+        ":auto":     "AUTO_APPROVED",
+        ":approved": "APPROVED",
+      },
+    }));
+    if ((existing.Count ?? 0) > 0) {
+      const item = existing.Items![0] as Record<string, unknown>;
+      const existingStatus   = String(item["status"]    ?? "");
+      const existingReviewId = String(item["review_id"] ?? "");
+      console.log(`[IDEMPOTENT] Active review ${existingReviewId} (${existingStatus}) already exists for ${event.patientId} — skipping`);
+      return {
+        statusCode:  200,
+        patientId:   event.patientId,
+        reviewId:    existingReviewId,
+        status:      existingStatus,
+        skipped:     true,
+        message:     `Protocol review already exists for patient ${event.patientId}`,
+        questionPriority: (item["protocol"] as { question_priority?: string[] } | undefined)?.question_priority ?? [],
+      };
+    }
+  }
+
   // STEP 2 — Load FHIR patient
   let patientRecord: Awaited<ReturnType<typeof getFullPatientRecord>>;
   try {
@@ -78,9 +116,6 @@ export const handler = async (
     .map((coding) => coding.code)
     .filter((code): code is string => !!code);
 
-  // Create dynamo client here so STEP 13 can reuse it
-  const dynamo = makeDynamo();
-  const patientsTable  = process.env["DYNAMO_TABLE_PATIENTS"]  ?? "PatientProfiles";
 
   const storedLace = await getLaceForPatient(event.patientId, dynamo, patientsTable);
 
@@ -294,25 +329,29 @@ export const handler = async (
     ? `REV-${event.patientId}-REGEN-${Date.now()}`
     : `REV-${event.patientId}-${Date.now()}`;
 
-  // STEP 12b — Enforce flag_color from clinical rules before saving
-  if (rules.length > 0 && protocol.root_node?.conditions) {
-    const clinicalRule = rules[0];
+  // STEP 12b — Ensure flag_color is set on every condition (always runs)
+  if (protocol.root_node?.conditions) {
+    const clinicalRule = rules.length > 0 ? rules[0] : null;
     (protocol.root_node as Record<string, unknown>)["conditions"] =
       (protocol.root_node.conditions as Record<string, unknown>[]).map((condition) => {
-        const matched = clinicalRule.conditions.find(
-          (c: { variable: string }) => c.variable === (condition as Record<string, unknown>)["variable"]
+        const c = condition as Record<string, unknown>;
+        // Priority 1: matched clinical rule condition
+        const matched = clinicalRule?.conditions.find(
+          (r: { variable: string }) => r.variable === c["variable"]
         );
-        return {
-          ...condition,
-          flag_color: matched?.flag_color ?? (condition as Record<string, unknown>)["flag_color"] ?? "YELLOW",
-        };
+        if (matched?.flag_color) return { ...c, flag_color: matched.flag_color };
+        // Priority 2: already set by Nova Pro (preserved through schema)
+        if (c["flag_color"]) return c;
+        // Priority 3: derive from weight — weight >= 0.80 = RED, else YELLOW
+        const weight = typeof c["weight"] === "number" ? (c["weight"] as number) : 0;
+        return { ...c, flag_color: weight >= 0.80 ? "RED" : "YELLOW" };
       });
-    (protocol as Record<string, unknown>)["flag_color"] = clinicalRule.flag_color;
+    if (clinicalRule) {
+      (protocol as Record<string, unknown>)["flag_color"] = clinicalRule.flag_color;
+    }
   }
 
   // STEP 13 — Save to ProtocolReview
-  const protocolsTable = process.env["DYNAMO_TABLE_PROTOCOLS"] ?? "TriageProtocols";
-  const reviewsTable = process.env["DYNAMO_TABLE_REVIEWS"] ?? "ProtocolReview";
   const now = new Date().toISOString();
 
   // If regeneration, fetch previous regeneration_count to increment it

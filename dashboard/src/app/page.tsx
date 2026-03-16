@@ -29,6 +29,26 @@ const DEFAULT_REVIEW_STATS: ReviewStats = {
   autoApproved: 0,
 };
 
+// ─── Rule → natural language ──────────────────────────────────────────────────
+// Mirrors the server-side convertRulesToNaturalLanguage in the summarizer so the
+// dashboard card badges read the same way as the SBAR assessment text.
+
+function ruleToNaturalLanguage(rule: string): string {
+  const m = rule.match(/^(\S+)\s*(>=|<=|>|<|==)\s*(.+)$/);
+  if (!m) return rule;
+  const [, varRaw, op, threshRaw] = m;
+  const varName = varRaw.replace(/_/g, " ");
+  const threshold = threshRaw.trim();
+  if (threshold === "true")  return `${varName} is present`;
+  if (threshold === "false") return `${varName} is absent`;
+  const opText =
+    op === ">=" ? "is at least" :
+    op === ">"  ? "exceeds"     :
+    op === "<=" ? "is at most"  :
+    op === "<"  ? "is below"    : "is";
+  return `${varName} ${opText} ${threshold}`;
+}
+
 // ─── Triage helpers ───────────────────────────────────────────────────────────
 
 function statusBadgeClass(status: PatientRecord["triageStatus"]): string {
@@ -170,7 +190,9 @@ function SbarModal({
       >
         <div className="sticky top-0 z-10 flex items-center justify-between bg-slate-800 border-b border-slate-600 px-6 py-4">
           <div className="flex items-center gap-3">
-            <span className="text-lg font-bold text-white">Patient {patient.patientId}</span>
+            <span className="text-lg font-bold text-white">
+              {patient.patientName ? `${patient.patientName} (${patient.patientId})` : patient.patientId}
+            </span>
             <span className={`px-2 py-0.5 rounded text-sm font-semibold ${statusBadgeClass(patient.triageStatus)}`}>
               {patient.triageStatus}
             </span>
@@ -201,7 +223,7 @@ function SbarModal({
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Broken Rules</h3>
               <div className="flex flex-wrap gap-2">
                 {patient.brokenRules.map((rule, i) => (
-                  <code key={i} className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded text-xs font-mono">{rule}</code>
+                  <span key={i} className="px-2 py-0.5 bg-slate-700 text-slate-200 rounded text-xs">{ruleToNaturalLanguage(rule)}</span>
                 ))}
               </div>
             </div>
@@ -468,7 +490,9 @@ function PatientCard({
         <span className={`px-2 py-0.5 rounded text-xs font-bold ${statusBadgeClass(patient.triageStatus)}`}>
           {patient.triageStatus}
         </span>
-        <span className="font-bold text-white">{patient.patientId}</span>
+        <span className="font-bold text-white">
+          {patient.patientName ? `${patient.patientName} (${patient.patientId})` : patient.patientId}
+        </span>
         {patient.conditionCode && <span className="text-slate-400 text-sm">{patient.conditionCode}</span>}
         {patient.protocolSource === "validated_library" && (
           <span className="px-2 py-0.5 rounded text-xs bg-green-800 text-green-200 font-medium">validated</span>
@@ -482,7 +506,7 @@ function PatientCard({
       {patient.brokenRules.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {patient.brokenRules.map((rule, i) => (
-            <code key={i} className="px-1.5 py-0.5 bg-slate-700 text-slate-300 rounded text-xs font-mono">{rule}</code>
+            <span key={i} className="px-1.5 py-0.5 bg-slate-700 text-slate-300 rounded text-xs">{ruleToNaturalLanguage(rule)}</span>
           ))}
         </div>
       )}

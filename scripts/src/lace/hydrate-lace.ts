@@ -95,6 +95,18 @@ export async function hydrateLace(): Promise<void> {
         recentEDVisits: record.encounterSummary.recentEDVisits,
       });
 
+      // Extract patient name from FHIR
+      const given  = record.patient.name[0]?.given[0] ?? "";
+      const family = record.patient.name[0]?.family ?? "";
+      const patientName = [given, family].filter(Boolean).join(" ");
+
+      // Extract primary condition code + display from FHIR
+      const firstCond = record.conditions[0];
+      const conditionCode    = firstCond?.code.coding[0]?.code ?? "";
+      const conditionDisplay = firstCond?.code.coding[0]?.display
+                            ?? firstCond?.code.text
+                            ?? conditionCode;
+
       await dynamo.send(
         new UpdateCommand({
           TableName: patientsTable,
@@ -107,6 +119,9 @@ export async function hydrateLace(): Promise<void> {
             "    lace_charlson_score     = :cs",
             "    lace_interpretation     = :li",
             "    lace_calculated_at      = :la",
+            ...(patientName    ? ["    patient_name      = :pn"] : []),
+            ...(conditionCode  ? ["    condition_code    = :cc"] : []),
+            ...(conditionDisplay ? ["    condition_display = :cd"] : []),
           ].join(", "),
           ExpressionAttributeValues: {
             ":ls": lace.totalScore,
@@ -116,6 +131,9 @@ export async function hydrateLace(): Promise<void> {
             ":cs": lace.charlsonScore,
             ":li": lace.interpretation,
             ":la": now,
+            ...(patientName    ? { ":pn": patientName }    : {}),
+            ...(conditionCode  ? { ":cc": conditionCode }  : {}),
+            ...(conditionDisplay ? { ":cd": conditionDisplay } : {}),
           },
         })
       );

@@ -39,6 +39,8 @@ function langCommunication(code: string) {
 
 // ─── Patient definitions ──────────────────────────────────────────────────────
 
+const TEST_PHONE = process.env["TEST_PHONE_NUMBER"] ?? "";
+
 const patients = [
   {
     patient: {
@@ -48,6 +50,7 @@ const patients = [
       birthDate: "1955-01-15",
       gender: "female",
       communication: langCommunication("en"),
+      ...(TEST_PHONE ? { telecom: [{ system: "phone", value: TEST_PHONE, use: "mobile" }] } : {}),
       extension: [
         { url: "discharge-date", valueDate: "2026-03-06" },
         { url: "readmission-risk", valueString: "HIGH" },

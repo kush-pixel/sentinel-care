@@ -79,9 +79,11 @@ const ENV_VARS: Record<string, string> = {
   NOVA_SONIC_TURN_TAKING: "MEDIUM",
   NOVA_SONIC_MAX_TOKENS: "4096",
   NOVA_SONIC_TEMPERATURE: "0.3",
-  LAMBDA_ARN_NOVA_SONIC:  "arn:aws:lambda:us-east-1:629843009128:function:sentinel-nova-sonic",
-  KVS_STREAM_ARN:         process.env["KVS_STREAM_ARN"]           ?? "",
-  CONNECT_CONTACT_FLOW_ID: process.env["CONNECT_CONTACT_FLOW_ID"] ?? "",
+  LAMBDA_ARN_NOVA_SONIC:      "arn:aws:lambda:us-east-1:629843009128:function:sentinel-nova-sonic",
+  LAMBDA_ARN_TRIAGE_ENGINE:   "arn:aws:lambda:us-east-1:629843009128:function:sentinel-triage-engine",
+  LAMBDA_ARN_SUMMARIZER:      "arn:aws:lambda:us-east-1:629843009128:function:sentinel-summarizer",
+  KVS_STREAM_ARN:             process.env["KVS_STREAM_ARN"]           ?? "",
+  CONNECT_CONTACT_FLOW_ID:    process.env["CONNECT_CONTACT_FLOW_ID"]  ?? "",
 };
 
 // ─── Step 1: Build ────────────────────────────────────────────────────────────

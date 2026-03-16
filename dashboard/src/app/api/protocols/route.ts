@@ -73,16 +73,11 @@ function mapReview(item: Record<string, unknown>): ProtocolReviewRecord {
   };
 }
 
-// ─── Sort order: PENDING first, then by created_at desc ──────────────────────
-
-function reviewSortOrder(r: ProtocolReviewRecord): number {
-  if (r.status === "PENDING_REVIEW") return 0;
-  if (r.status === "AUTO_APPROVED") return 1;
-  if (r.status === "APPROVED") return 2;
-  return 3; // REJECTED
-}
-
 // ─── GET /api/protocols ───────────────────────────────────────────────────────
+// Returns ONLY ProtocolReview records with status = PENDING_REVIEW.
+// Never returns AUTO_APPROVED, APPROVED, or REJECTED records in the reviews array.
+// Deduplicates by patient_id: keeps the most recent PENDING_REVIEW record per patient.
+// Stats are computed from ALL records for accurate counts.
 
 export async function GET(): Promise<NextResponse> {
   const rateLimit = checkRateLimit("protocols-api");
@@ -94,22 +89,39 @@ export async function GET(): Promise<NextResponse> {
     const table = process.env.DYNAMO_TABLE_REVIEWS ?? "ProtocolReview";
     const result = await docClient.send(new ScanCommand({ TableName: table }));
 
-    const items = result.Items ?? [];
-    const reviews = items
-      .map((item) => mapReview(item as Record<string, unknown>))
-      .sort((a, b) => {
-        const orderDiff = reviewSortOrder(a) - reviewSortOrder(b);
-        if (orderDiff !== 0) return orderDiff;
-        return b.createdAt.localeCompare(a.createdAt);
-      });
+    const allReviews = (result.Items ?? []).map((item) =>
+      mapReview(item as Record<string, unknown>)
+    );
 
+    // Stats computed from ALL records (accurate counts across all statuses)
     const stats: ReviewStats = {
-      total: reviews.length,
-      pending: reviews.filter((r) => r.status === "PENDING_REVIEW").length,
-      approved: reviews.filter((r) => r.status === "APPROVED").length,
-      rejected: reviews.filter((r) => r.status === "REJECTED").length,
-      autoApproved: reviews.filter((r) => r.status === "AUTO_APPROVED").length,
+      total:       allReviews.length,
+      pending:     allReviews.filter((r) => r.status === "PENDING_REVIEW").length,
+      approved:    allReviews.filter((r) => r.status === "APPROVED").length,
+      rejected:    allReviews.filter((r) => r.status === "REJECTED").length,
+      autoApproved: allReviews.filter((r) => r.status === "AUTO_APPROVED").length,
     };
+
+    // Display list: ONLY PENDING_REVIEW, sorted newest first, ONE per patient
+    const pendingSorted = allReviews
+      .filter((r) => r.status === "PENDING_REVIEW")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    // Safeguard: deduplicate by patient_id (case-insensitive), keep most recent
+    const seenPatients = new Set<string>();
+    const reviews = pendingSorted.filter((r) => {
+      const pid = r.patientId.toLowerCase();
+      if (seenPatients.has(pid)) return false;
+      seenPatients.add(pid);
+      return true;
+    });
+
+    // Safeguard: assert no duplicate patient_ids before returning
+    const patientIds = reviews.map((r) => r.patientId.toLowerCase());
+    const uniqueIds  = new Set(patientIds);
+    if (patientIds.length !== uniqueIds.size) {
+      console.error("DUPLICATE PATIENT IDS IN PROTOCOL REVIEW — dedup failed");
+    }
 
     return NextResponse.json({ reviews, stats });
   } catch (err) {

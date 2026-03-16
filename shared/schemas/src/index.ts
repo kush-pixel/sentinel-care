@@ -7,6 +7,7 @@ const ConditionNodeSchema = z.object({
   operator: z.enum([">=", "<=", "==", ">", "<"]),
   threshold: z.union([z.number(), z.boolean(), z.string()]),
   weight: z.number().min(0).max(1).optional(),
+  flag_color: z.enum(["RED", "YELLOW", "GREEN"]).optional(),
 });
 
 export type ConditionNode = z.infer<typeof ConditionNodeSchema>;

@@ -31,8 +31,8 @@ dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const REGION           = process.env["AWS_REGION"] ?? "us-east-1";
-const FHIR_BASE        = "http://44.198.181.68:8080/fhir";
-const EC2_INSTANCE_ID  = "i-0f4420d87956be2c5";
+const FHIR_BASE        = process.env["FHIR_BASE_URL"] ?? "http://3.239.230.36:8080/fhir";
+const EC2_INSTANCE_ID  = "i-0733d2280cf6d2239";
 const INSTANCE_ID      = "40725174-b7f7-4388-8ea4-e761fd3c18fe";
 const EXPECTED_FLOW_ID = "45faa7a9-62ac-468c-a186-cc3f012766f7";
 const EXPECTED_PATIENTS = 6;
@@ -229,6 +229,10 @@ async function checkTriageEngine(lambda: LambdaClient): Promise<CheckResult> {
 // ─── Step 8: P001 phone number ────────────────────────────────────────────────
 
 async function checkP001Phone(fhirUp: boolean): Promise<CheckResult> {
+  const expectedPhone = process.env["TEST_PHONE_NUMBER"] ?? "";
+  if (!expectedPhone) {
+    return { label: "P001 phone number", pass: true, detail: "SKIPPED — TEST_PHONE_NUMBER not set" };
+  }
   if (!fhirUp) {
     return { label: "P001 phone number", pass: false, detail: "SKIPPED — FHIR server down" };
   }
@@ -241,11 +245,11 @@ async function checkP001Phone(fhirUp: boolean): Promise<CheckResult> {
       telecom?: Array<{ system?: string; value?: string }>;
     };
     const phone = (patient.telecom ?? []).find(
-      (t) => t.system === "phone" && t.value === "+18722883249"
+      (t) => t.system === "phone" && t.value === expectedPhone
     );
     return phone
-      ? { label: "P001 phone number", pass: true,  detail: "+18722883249 present" }
-      : { label: "P001 phone number", pass: false, detail: "Phone +18722883249 not found in telecom" };
+      ? { label: "P001 phone number", pass: true,  detail: `${expectedPhone} present` }
+      : { label: "P001 phone number", pass: false, detail: `Phone ${expectedPhone} not found in telecom` };
   } catch (err: unknown) {
     const msg = (err instanceof Error) ? err.message : String(err);
     return { label: "P001 phone number", pass: false, detail: msg };
@@ -352,7 +356,7 @@ async function main(): Promise<void> {
     console.log(`  EC2 instance ${EC2_INSTANCE_ID}: ${ec2State}`);
     console.log("  The EC2 instance is running but HAPI FHIR (port 8080) is not responding.");
     console.log("  To restart the FHIR server, SSH into the instance and run:");
-    console.log("    ssh -i <your-key.pem> ec2-user@44.198.181.68");
+    console.log("    ssh -i <your-key.pem> ec2-user@3.239.230.36");
     console.log("    sudo systemctl restart hapi-fhir");
     console.log("    # or check the process:");
     console.log("    sudo systemctl status hapi-fhir");
