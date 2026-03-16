@@ -1,8 +1,8 @@
-# Sentinel Voice — Post-Discharge Voice Triage System
+# Sentinel Care — Post-Discharge Voice Triage System
 
 > **Automated AI voice calls that assess discharged patients before they become readmissions.**
 
-Sentinel Voice places outbound phone calls to hospital patients after discharge, conducts a structured clinical assessment using natural speech, and delivers a real-time triage report to the care team's dashboard — complete with an AI-generated SBAR clinical summary and immediate SNS escalation for high-risk patients.
+Sentinel Care places outbound phone calls to hospital patients after discharge, conducts a structured clinical assessment using natural speech, and delivers a real-time triage report to the care team's dashboard — complete with an AI-generated SBAR clinical summary and immediate SNS escalation for high-risk patients.
 
 ---
 
@@ -17,7 +17,7 @@ Traditional phone-based follow-up programs fail because:
 
 ## The Solution
 
-Sentinel Voice automates the entire follow-up loop:
+Sentinel Care automates the entire follow-up loop:
 
 ```
 Discharge → AI generates personalized triage protocol
