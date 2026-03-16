@@ -43,7 +43,7 @@ import { handler as summarizerHandler }  from "../../../lambdas/summarizer/src/h
 
 // ─── DynamoDB for verification ─────────────────────────────────────────────────
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand, GetCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import fetch from "node-fetch";
 import { ListTablesCommand } from "@aws-sdk/client-dynamodb";
 
@@ -143,6 +143,40 @@ async function main(): Promise<void> {
 
   // ─── STEP 4 — Seed demo call results ────────────────────────────────────────
   console.log("STEP 4 — Seeding demo call results...");
+
+  // Clean up any real call records for demo patients so they don't
+  // overshadow the seeded C001–C006 records (real calls have newer timestamps)
+  const cleanupDynamo = makeDynamo();
+  const resultsTableCleanup = process.env["DYNAMO_TABLE_RESULTS"] ?? "CallResults";
+  const DEMO_PATIENTS = ["P001", "P002", "P003", "P005", "P006"];
+  let totalDeleted = 0;
+
+  for (const patientId of DEMO_PATIENTS) {
+    const scan = await cleanupDynamo.send(new ScanCommand({
+      TableName: resultsTableCleanup,
+      FilterExpression: "patient_id = :pid",
+      ExpressionAttributeValues: { ":pid": patientId },
+    }));
+    const toDelete = (scan.Items ?? []).filter(
+      (item) => !String(item["call_id"] ?? "").startsWith("C00")
+    );
+    for (const item of toDelete) {
+      await cleanupDynamo.send(new DeleteCommand({
+        TableName: resultsTableCleanup,
+        Key: { call_id: item["call_id"], patient_id: item["patient_id"] },
+      }));
+    }
+    if (toDelete.length > 0) {
+      console.log(`  Cleared ${toDelete.length} real call record(s) for ${patientId}`);
+      totalDeleted += toDelete.length;
+    }
+  }
+  if (totalDeleted === 0) {
+    console.log("  ✓ No real call records to clear");
+  } else {
+    console.log(`  ✓ ${totalDeleted} real call record(s) removed`);
+  }
+
   await seedDemoResults();
   console.log("  ✓ Demo call results seeded (5 patients)\n");
 
@@ -277,11 +311,30 @@ async function main(): Promise<void> {
   );
   const protocolCount = protocolScan.Count ?? 0;
 
-  // Build lookup maps
+  // Build lookup maps (prefer demo records C001–C006)
   const callMap = new Map<string, Record<string, unknown>>();
   for (const item of callItems) {
     const pid = item["patient_id"] as string | undefined;
-    if (pid) callMap.set(pid, item as Record<string, unknown>);
+    const cid = String(item["call_id"] ?? "");
+    if (pid && cid.startsWith("C00")) {
+      callMap.set(pid, item as Record<string, unknown>);
+    }
+  }
+
+  // Per-patient count check — warn if any demo patient has extra records
+  const countPerPatient = new Map<string, number>();
+  for (const item of callItems) {
+    const pid = item["patient_id"] as string | undefined;
+    if (pid) countPerPatient.set(pid, (countPerPatient.get(pid) ?? 0) + 1);
+  }
+  for (const pid of DEMO_PATIENTS) {
+    const count = countPerPatient.get(pid) ?? 0;
+    if (count !== 1) {
+      console.warn(`  ⚠ ${pid} has ${count} CallResult record(s) — expected 1`);
+      callItems
+        .filter(i => i["patient_id"] === pid)
+        .forEach(i => console.warn(`      call_id: ${String(i["call_id"] ?? "?")}`));
+    }
   }
 
   // Get P004 LACE from PatientProfiles (no call result for P004)
