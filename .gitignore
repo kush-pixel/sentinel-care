@@ -45,7 +45,7 @@ coverage/
 *.temp
 
 .env
-.env.*
+!.env.judge
 !.env.example
 # Claude Code files
 .claude/
