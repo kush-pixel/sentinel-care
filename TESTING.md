@@ -60,7 +60,7 @@ All checks should show `✓`. See [Common Issues](#common-issues) if any fail.
 Before running any tests, ensure:
 
 1. `.env` is configured (copy from `.env.example` and fill all values)
-2. AWS credentials are active (`aws sts get-caller-identity` should succeed)
+2. AWS credentials are configured (copy `.env.judge` to `.env`)
 3. All Lambda functions are deployed (`npm run deploy:lambdas` from `scripts/`)
 4. HAPI FHIR server is reachable at the `FHIR_BASE_URL` in your `.env`
 5. Amazon Connect instance is configured with the Sentinel contact flow

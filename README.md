@@ -143,12 +143,9 @@ node --version  # v20.x.x or higher
 npm --version   # v9.x.x or higher
 ```
 
-**AWS CLI**
-```bash
-aws --version
-# Configure with the credentials provided:
-aws configure
-```
+**AWS SDK (included)**
+
+AWS credentials are pre-configured in `.env.judge`. No AWS CLI installation required. The project uses the AWS SDK directly via the credentials in your `.env` file.
 
 **Clone and install**
 ```bash
