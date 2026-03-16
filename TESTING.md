@@ -1,6 +1,6 @@
-# Sentinel Voice — Testing Guide
+# Sentinel Care — Testing Guide
 
-This guide walks judges through verifying the full Sentinel Voice pipeline: from patient data setup through a real outbound voice call to the nurse dashboard.
+This guide walks judges through verifying the full Sentinel Care pipeline: from patient data setup through a real outbound voice call to the nurse dashboard.
 
 ---
 
