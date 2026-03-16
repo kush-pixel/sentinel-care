@@ -137,8 +137,28 @@ export async function GET(): Promise<NextResponse> {
       if (pid && status) reviewStatusMap.set(pid, status);
     }
 
-    // STEP 2 — Map items and filter out PENDING_REVIEW patients
-    const allPatients = (result.Items ?? []).map((item) =>
+    // STEP 2 — Map items: only COMPLETE calls, one per patient (most recent by call_timestamp)
+    const completeItems = (result.Items ?? []).filter(
+      (item) => (item as Record<string, unknown>)["call_status"] === "COMPLETE"
+    );
+
+    // Sort descending by call_timestamp so the first seen per patient_id is the latest
+    completeItems.sort((a, b) => {
+      const ta = String((a as Record<string, unknown>)["call_timestamp"] ?? "");
+      const tb = String((b as Record<string, unknown>)["call_timestamp"] ?? "");
+      return tb.localeCompare(ta);
+    });
+
+    // Deduplicate: keep only the most recent COMPLETE record per patient
+    const seenPatients = new Set<string>();
+    const dedupedItems = completeItems.filter((item) => {
+      const pid = String((item as Record<string, unknown>)["patient_id"] ?? "");
+      if (seenPatients.has(pid)) return false;
+      seenPatients.add(pid);
+      return true;
+    });
+
+    const allPatients = dedupedItems.map((item) =>
       mapItem(item as Record<string, unknown>)
     );
     const patients = allPatients

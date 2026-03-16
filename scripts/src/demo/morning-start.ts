@@ -69,18 +69,25 @@ async function main(): Promise<void> {
   // ─── STEP 0 — Verify Docker / local services ────────────────────────────────
   console.log("STEP 0 — Verifying local services...");
 
+  const fhirUrl = process.env["FHIR_BASE_URL"] ?? "http://localhost:8080/fhir";
   try {
     const fhirRes = await fetch(
-      `${process.env["FHIR_BASE_URL"] ?? "http://localhost:8080/fhir"}/metadata`,
+      `${fhirUrl}/metadata`,
       { signal: AbortSignal.timeout(5000) as unknown as import("node-fetch").RequestInit["signal"] }
     );
     if (!fhirRes.ok) throw new Error(`HTTP ${fhirRes.status}`);
     console.log("  ✓ FHIR server running");
   } catch {
-    console.error("  ✗ FHIR server not running");
-    console.error("    Start Docker Desktop and run:");
-    console.error("      scripts\\start-local.ps1");
-    console.error("    Wait 90 seconds then run this again.");
+    const isLocal = fhirUrl.includes("localhost");
+    if (isLocal) {
+      console.error(`  ✗ Local FHIR server not running`);
+      console.error("    Start Docker Desktop and run:");
+      console.error("      scripts\\start-local.ps1");
+      console.error("    Wait 90 seconds then run this again.");
+    } else {
+      console.error(`  ✗ AWS FHIR server not responding at ${fhirUrl}`);
+      console.error("    Run: npm run rebuild:fhir");
+    }
     process.exit(1);
   }
 
@@ -90,11 +97,19 @@ async function main(): Promise<void> {
       ...(process.env["DYNAMO_ENDPOINT"] && { endpoint: process.env["DYNAMO_ENDPOINT"] }),
     });
     await raw.send(new ListTablesCommand({}));
-    console.log("  ✓ DynamoDB Local running\n");
+    if (process.env["DYNAMO_ENDPOINT"]) {
+      console.log("  ✓ DynamoDB Local running\n");
+    } else {
+      console.log("  ✓ AWS DynamoDB connected\n");
+    }
   } catch {
-    console.error("  ✗ DynamoDB Local not running");
-    console.error("    Start Docker Desktop and run:");
-    console.error("      scripts\\start-local.ps1");
+    if (process.env["DYNAMO_ENDPOINT"]) {
+      console.error("  ✗ DynamoDB Local not running");
+      console.error("    Start Docker Desktop and run:");
+      console.error("      scripts\\start-local.ps1");
+    } else {
+      console.error("  ✗ AWS DynamoDB not reachable — check credentials and region");
+    }
     process.exit(1);
   }
 

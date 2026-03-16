@@ -35,17 +35,24 @@ interface FhirTelecom {
 }
 interface FhirPatientResource {
   telecom?: FhirTelecom[];
+  name?: Array<{ given?: string[] }>;
 }
 
-async function getPatientPhone(patientId: string): Promise<string | null> {
+interface PatientInfo {
+  phone: string | null;
+  name:  string;
+}
+
+async function getPatientInfo(patientId: string): Promise<PatientInfo> {
   try {
     const res = await fetch(`${fhirBase()}/Patient/${patientId}`);
-    if (!res.ok) return null;
+    if (!res.ok) return { phone: null, name: "there" };
     const patient = (await res.json()) as FhirPatientResource;
-    const phone = (patient.telecom ?? []).find((t) => t.system === "phone");
-    return phone?.value ?? null;
+    const phone = (patient.telecom ?? []).find((t) => t.system === "phone")?.value ?? null;
+    const name  = patient.name?.[0]?.given?.[0] ?? "there";
+    return { phone, name };
   } catch {
-    return null;
+    return { phone: null, name: "there" };
   }
 }
 
@@ -63,11 +70,11 @@ export const handler = async (
     return { statusCode: 400, error: "Invalid callId format" };
   }
 
-  // STEP 1b — Resolve phone: prefer explicit override, else load from FHIR
-  let patientPhone = event.phoneNumber ?? null;
-  if (!patientPhone) {
-    patientPhone = await getPatientPhone(event.patientId);
-  }
+  // STEP 1b — Resolve phone + name from FHIR (phone can be overridden by caller)
+  const patientInfo = await getPatientInfo(event.patientId);
+  let patientPhone  = event.phoneNumber ?? patientInfo.phone;
+  const patientName = patientInfo.name;
+
   if (!patientPhone) {
     return {
       statusCode: 400,
@@ -144,6 +151,7 @@ export const handler = async (
           Attributes: {
             patientId:    event.patientId,
             callId:       event.callId,
+            patientName,
             kvsStreamArn: process.env["KVS_STREAM_ARN"] ?? "",
           },
         })

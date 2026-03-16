@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../../",
+    "outDir": "./dist",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "paths": {
+      "@sentinel/audit":      ["../../shared/audit/src/index.ts"],
+      "@sentinel/validation": ["../../shared/validation/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
+  }
+}

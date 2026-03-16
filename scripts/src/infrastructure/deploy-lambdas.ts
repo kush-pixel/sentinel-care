@@ -34,27 +34,31 @@ const SEP = "──────────────────────�
 // ─── Lambda Definitions ───────────────────────────────────────────────────────
 
 interface LambdaDef {
-  name: string;
-  dir: string;
-  envKey: string;
+  name:     string;
+  dir:      string;
+  envKey:   string;
+  timeout?: number;
+  memory?:  number;
 }
 
 const LAMBDAS: LambdaDef[] = [
-  { name: "sentinel-care-planner", dir: "lambdas/care-planner", envKey: "LAMBDA_ARN_CARE_PLANNER" },
-  { name: "sentinel-summarizer", dir: "lambdas/summarizer", envKey: "LAMBDA_ARN_SUMMARIZER" },
-  { name: "sentinel-extractor", dir: "lambdas/extractor", envKey: "LAMBDA_ARN_EXTRACTOR" },
-  { name: "sentinel-call-initiator", dir: "lambdas/call-initiator", envKey: "LAMBDA_ARN_CALL_INITIATOR" },
+  { name: "sentinel-care-planner",     dir: "lambdas/care-planner",     envKey: "LAMBDA_ARN_CARE_PLANNER"     },
+  { name: "sentinel-summarizer",       dir: "lambdas/summarizer",       envKey: "LAMBDA_ARN_SUMMARIZER"       },
+  { name: "sentinel-extractor",        dir: "lambdas/extractor",        envKey: "LAMBDA_ARN_EXTRACTOR"        },
+  { name: "sentinel-call-initiator",   dir: "lambdas/call-initiator",   envKey: "LAMBDA_ARN_CALL_INITIATOR"   },
   { name: "sentinel-answer-collector", dir: "lambdas/answer-collector", envKey: "LAMBDA_ARN_ANSWER_COLLECTOR" },
-  { name: "sentinel-call-complete", dir: "lambdas/call-complete", envKey: "LAMBDA_ARN_CALL_COMPLETE" },
-  { name: "sentinel-nova-sonic", dir: "lambdas/nova-sonic-handler", envKey: "LAMBDA_ARN_NOVA_SONIC" },
-  { name: "sentinel-triage-engine", dir: "packages/triage-engine", envKey: "LAMBDA_ARN_TRIAGE_ENGINE" },
+  { name: "sentinel-call-complete",    dir: "lambdas/call-complete",    envKey: "LAMBDA_ARN_CALL_COMPLETE"    },
+  { name: "sentinel-nova-sonic",       dir: "lambdas/nova-sonic-handler", envKey: "LAMBDA_ARN_NOVA_SONIC"     },
+  { name: "sentinel-triage-engine",    dir: "packages/triage-engine",   envKey: "LAMBDA_ARN_TRIAGE_ENGINE"    },
+  { name: "sentinel-call-bridge",     dir: "lambdas/call-bridge",     envKey: "LAMBDA_ARN_CALL_BRIDGE",     timeout: 10, memory: 256 },
+  { name: "sentinel-lex-fulfillment", dir: "lambdas/lex-fulfillment", envKey: "LAMBDA_ARN_LEX_FULFILLMENT", timeout: 30, memory: 256 },
 ];
 
 // ─── Environment Variables ─────────────────────────────────────────────────────
 
 const ENV_VARS: Record<string, string> = {
 
-  FHIR_BASE_URL: "http://44.198.181.68:8080/fhir",
+  FHIR_BASE_URL: process.env["FHIR_BASE_URL"] ?? "http://44.198.181.68:8080/fhir",
   DYNAMO_TABLE_PATIENTS: "PatientProfiles",
   DYNAMO_TABLE_PROTOCOLS: "TriageProtocols",
   DYNAMO_TABLE_RESULTS: "CallResults",
@@ -75,6 +79,9 @@ const ENV_VARS: Record<string, string> = {
   NOVA_SONIC_TURN_TAKING: "MEDIUM",
   NOVA_SONIC_MAX_TOKENS: "4096",
   NOVA_SONIC_TEMPERATURE: "0.3",
+  LAMBDA_ARN_NOVA_SONIC:  "arn:aws:lambda:us-east-1:629843009128:function:sentinel-nova-sonic",
+  KVS_STREAM_ARN:         process.env["KVS_STREAM_ARN"]           ?? "",
+  CONNECT_CONTACT_FLOW_ID: process.env["CONNECT_CONTACT_FLOW_ID"] ?? "",
 };
 
 // ─── Step 1: Build ────────────────────────────────────────────────────────────
@@ -172,8 +179,8 @@ async function deployLambda(client: LambdaClient, def: LambdaDef): Promise<strin
     const cfg = await client.send(new UpdateFunctionConfigurationCommand({
       FunctionName: def.name,
       Handler: "dist/handler.handler",
-      Timeout: 300,
-      MemorySize: 512,
+      Timeout:    def.timeout ?? 300,
+      MemorySize: def.memory  ?? 512,
       Environment: { Variables: ENV_VARS },
     }));
     if (cfg.FunctionArn) {
@@ -188,8 +195,8 @@ async function deployLambda(client: LambdaClient, def: LambdaDef): Promise<strin
       Role: ROLE_ARN,
       Handler: "dist/handler.handler",
       Code: { ZipFile: zipBuffer },
-      Timeout: 300,
-      MemorySize: 512,
+      Timeout:    def.timeout ?? 300,
+      MemorySize: def.memory  ?? 512,
       Environment: { Variables: ENV_VARS },
     }));
     if (created.FunctionArn) {
