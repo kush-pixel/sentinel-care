@@ -19,9 +19,11 @@ All AWS services are already running:
 ### Setup (2 minutes)
 
 ```bash
-# 1. Configure environment
-cp .env.example .env
-# Fill in values from submission package
+# 1. Copy pre-configured environment
+cp .env.judge .env
+
+# Optional: change to YOUR phone number
+# Edit .env: TEST_PHONE_NUMBER=+1XXXXXXXXXX
 
 # 2. Reset demo data
 cd scripts && npm run morning:start

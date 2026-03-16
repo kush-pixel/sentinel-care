@@ -159,11 +159,17 @@ npm install
 
 ### Step 1 — Configure environment
 
+A pre-configured environment file is included:
+
 ```bash
-cp .env.example .env
+cp .env.judge .env
 ```
 
-Fill in `.env` with the values provided in the submission notes (or use the pre-filled `.env` from the submission package). Every key is documented with comments in `.env.example`.
+To test calls on YOUR phone, edit `.env` and change:
+
+```
+TEST_PHONE_NUMBER=+1XXXXXXXXXX
+```
 
 ### Step 2 — Reset demo state
 
