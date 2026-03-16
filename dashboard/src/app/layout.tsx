@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sentinel Voice — Nurse Dashboard",
+  title: "Sentinel Care — Nurse Dashboard",
   description: "Post-discharge triage monitoring",
 };
 

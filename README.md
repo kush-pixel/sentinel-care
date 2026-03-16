@@ -133,73 +133,70 @@ sentinel-care/
 
 ## Getting Started
 
+> The AWS infrastructure (EC2, Lambda, Connect, Lex, DynamoDB) is already deployed and running. You just need to configure your local environment and seed the demo data.
+
 ### Prerequisites
 
-- AWS account with Bedrock access (Nova models enabled in your region)
-- Amazon Connect instance configured
-- HAPI FHIR R4 server with patient data
-- Node.js 20+ and npm
-- AWS CLI configured with appropriate permissions
-
-### 1. Clone and install
-
+**Node.js 20+**
 ```bash
-git clone https://github.com/<your-org>/sentinel-care.git
-cd sentinel-care
-npm install
-cd dashboard && npm install
-cd ../scripts && npm install
+node --version  # v20.x.x or higher
+npm --version   # v9.x.x or higher
 ```
 
-### 2. Configure environment
+**AWS CLI**
+```bash
+aws --version
+# Configure with the credentials provided:
+aws configure
+```
+
+**Clone and install**
+```bash
+git clone https://github.com/kush-pixel/sentinel-care
+cd sentinel-care
+npm install
+```
+
+### Step 1 — Configure environment
 
 ```bash
 cp .env.example .env
-# Fill in all values — every key is documented in .env.example
 ```
 
-### 3. Seed patient data
+Fill in `.env` with the values provided in the submission notes (or use the pre-filled `.env` from the submission package). Every key is documented with comments in `.env.example`.
+
+### Step 2 — Reset demo state
 
 ```bash
 cd scripts
-npm run seed:fhir          # Seed patient FHIR records
-npm run seed:encounters    # Seed encounter / discharge data
-npm run seed:rules         # Seed versioned clinical rules
-npm run lace:hydrate       # Calculate and store LACE scores
-npm run seed:demo          # Seed demo call results for dashboard preview
+npm run morning:start
 ```
 
-### 4. Deploy infrastructure
+Takes ~50 seconds. Loads 6 demo patients with triage protocols, LACE scores, and SBAR summaries.
 
-```bash
-npm run setup:lex          # Create/update Lex bot and intents
-npm run setup:contact-flow # Create Connect contact flow
-npm run deploy:lambdas     # Package and deploy all Lambda functions
-```
-
-### 5. Generate triage protocols
-
-```bash
-npm run morning:start      # Generates approved protocols for all patients
-```
-
-### 6. Start the dashboard
+### Step 3 — Start the dashboard
 
 ```bash
 cd dashboard
-npm run dev                # http://localhost:3000
+npm run dev
 ```
 
-### 7. Place a test call
+Open [http://localhost:3000](http://localhost:3000)
 
+### Step 4 — Test a real call (optional)
+
+Set your phone number in `.env`:
+```
+TEST_PHONE_NUMBER=+1XXXXXXXXXX
+```
+
+Then:
 ```bash
-# Set TEST_PHONE_NUMBER=+1XXXXXXXXXX in .env first
 cd scripts
-npm run test:p002-call     # Places real outbound call to P002 (knee replacement)
-
-# After the call ends, audit the full pipeline:
-npm run post-call-audit -- P002
+npm run test:real-call
 ```
+
+Your phone will ring from `+17208446427`. Answer and speak naturally to Nova 2 Sonic.
 
 ---
 

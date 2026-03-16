@@ -39,13 +39,13 @@ function ruleToNaturalLanguage(rule: string): string {
   const [, varRaw, op, threshRaw] = m;
   const varName = varRaw.replace(/_/g, " ");
   const threshold = threshRaw.trim();
-  if (threshold === "true")  return `${varName} is present`;
+  if (threshold === "true") return `${varName} is present`;
   if (threshold === "false") return `${varName} is absent`;
   const opText =
     op === ">=" ? "is at least" :
-    op === ">"  ? "exceeds"     :
-    op === "<=" ? "is at most"  :
-    op === "<"  ? "is below"    : "is";
+      op === ">" ? "exceeds" :
+        op === "<=" ? "is at most" :
+          op === "<" ? "is below" : "is";
   return `${varName} ${opText} ${threshold}`;
 }
 
@@ -53,9 +53,9 @@ function ruleToNaturalLanguage(rule: string): string {
 
 function statusBadgeClass(status: PatientRecord["triageStatus"]): string {
   switch (status) {
-    case "RED":        return "bg-red-600 text-white";
-    case "YELLOW":     return "bg-yellow-500 text-black";
-    case "GREEN":      return "bg-green-600 text-white";
+    case "RED": return "bg-red-600 text-white";
+    case "YELLOW": return "bg-yellow-500 text-black";
+    case "GREEN": return "bg-green-600 text-white";
     case "INCOMPLETE": return "bg-slate-500 text-white";
   }
 }
@@ -63,9 +63,9 @@ function statusBadgeClass(status: PatientRecord["triageStatus"]): string {
 function cardBorderClass(p: PatientRecord): string {
   if (p.nurseAcknowledged) return "border-slate-600 bg-slate-800 opacity-60";
   switch (p.triageStatus) {
-    case "RED":        return "border-red-500 bg-red-950";
-    case "YELLOW":     return "border-yellow-500 bg-yellow-950";
-    case "GREEN":      return "border-green-600 bg-slate-800";
+    case "RED": return "border-red-500 bg-red-950";
+    case "YELLOW": return "border-yellow-500 bg-yellow-950";
+    case "GREEN": return "border-green-600 bg-slate-800";
     case "INCOMPLETE": return "border-slate-600 bg-slate-800";
   }
 }
@@ -73,9 +73,9 @@ function cardBorderClass(p: PatientRecord): string {
 function lacePillClass(riskLevel: string): string {
   switch (riskLevel.toUpperCase()) {
     case "VERY HIGH":
-    case "HIGH":     return "bg-red-800 text-red-100";
+    case "HIGH": return "bg-red-800 text-red-100";
     case "MODERATE": return "bg-yellow-800 text-yellow-100";
-    default:         return "bg-slate-700 text-slate-200";
+    default: return "bg-slate-700 text-slate-200";
   }
 }
 
@@ -83,10 +83,10 @@ function recommendationColorClass(
   status: PatientRecord["triageStatus"]
 ): string {
   switch (status) {
-    case "RED":    return "text-red-400";
+    case "RED": return "text-red-400";
     case "YELLOW": return "text-yellow-400";
-    case "GREEN":  return "text-green-400";
-    default:       return "text-slate-300";
+    case "GREEN": return "text-green-400";
+    default: return "text-slate-300";
   }
 }
 
@@ -114,10 +114,10 @@ function confidenceLabelClass(score: number): string {
 
 function flagColorEmoji(flagColor: string | undefined): string {
   switch ((flagColor ?? "").toUpperCase()) {
-    case "RED":    return "🔴";
+    case "RED": return "🔴";
     case "YELLOW": return "🟡";
-    case "GREEN":  return "🟢";
-    default:       return "⚪";
+    case "GREEN": return "🟢";
+    default: return "⚪";
   }
 }
 
@@ -549,10 +549,10 @@ function ReviewCard({
   const cardClass = isPending
     ? "border-amber-500 bg-amber-950"
     : isApproved
-    ? "border-green-600 bg-slate-800"
-    : isRejected
-    ? "border-red-800 bg-slate-800"
-    : "border-slate-600 bg-slate-800";
+      ? "border-green-600 bg-slate-800"
+      : isRejected
+        ? "border-red-800 bg-slate-800"
+        : "border-slate-600 bg-slate-800";
 
   const questions = review.protocol?.question_priority ?? [];
   const pct = Math.round(review.confidenceScore * 100);
@@ -718,8 +718,8 @@ function Toast({
     type === "success"
       ? "bg-green-800 border border-green-600 text-green-100"
       : type === "warning"
-      ? "bg-amber-800 border border-amber-600 text-amber-100"
-      : "bg-red-800 border border-red-600 text-red-100";
+        ? "bg-amber-800 border border-amber-600 text-amber-100"
+        : "bg-red-800 border border-red-600 text-red-100";
   const icon = type === "success" ? "✓ " : type === "warning" ? "⚠ " : "✗ ";
   return (
     <div className={`fixed top-4 right-4 z-[60] max-w-sm px-4 py-3 rounded-lg shadow-xl text-sm font-medium transition-all ${cls}`}>
@@ -886,7 +886,7 @@ export default function Page() {
         <div className="max-w-7xl mx-auto flex items-center gap-4 flex-wrap">
           {/* Left: branding */}
           <div className="flex-shrink-0">
-            <div className="font-bold text-lg text-white tracking-wide">SENTINEL VOICE</div>
+            <div className="font-bold text-lg text-white tracking-wide">SENTINEL CARE</div>
             <div className="text-xs text-slate-400">Post-Discharge Triage Dashboard</div>
           </div>
 
@@ -907,11 +907,10 @@ export default function Page() {
             <span className="text-slate-600 font-light">|</span>
             <button
               onClick={() => setActiveTab("protocols")}
-              className={`flex items-center gap-1 px-3 py-1 rounded-full border text-sm font-semibold transition-colors ${
-                (pendingProtocolCount ?? reviewStats.pending) > 0
+              className={`flex items-center gap-1 px-3 py-1 rounded-full border text-sm font-semibold transition-colors ${(pendingProtocolCount ?? reviewStats.pending) > 0
                   ? "bg-amber-900 border-amber-600 text-amber-200 hover:bg-amber-800"
                   : "bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700"
-              }`}
+                }`}
             >
               📋 {pendingProtocolCount ?? reviewStats.pending} PENDING REVIEW
             </button>
@@ -946,11 +945,10 @@ export default function Page() {
         <div className="flex gap-1 mb-6 border-b border-slate-700">
           <button
             onClick={() => setActiveTab("triage")}
-            className={`px-4 py-2 text-sm font-semibold transition-colors relative ${
-              activeTab === "triage"
+            className={`px-4 py-2 text-sm font-semibold transition-colors relative ${activeTab === "triage"
                 ? "text-white"
                 : "text-slate-400 hover:text-slate-200"
-            }`}
+              }`}
           >
             Triage Results
             {activeTab === "triage" && (
@@ -959,11 +957,10 @@ export default function Page() {
           </button>
           <button
             onClick={() => setActiveTab("protocols")}
-            className={`px-4 py-2 text-sm font-semibold transition-colors relative flex items-center gap-2 ${
-              activeTab === "protocols"
+            className={`px-4 py-2 text-sm font-semibold transition-colors relative flex items-center gap-2 ${activeTab === "protocols"
                 ? "text-white"
                 : "text-slate-400 hover:text-slate-200"
-            }`}
+              }`}
           >
             Protocol Review
             {reviewStats.pending > 0 && (

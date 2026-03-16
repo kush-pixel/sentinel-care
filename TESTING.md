@@ -4,6 +4,55 @@ This guide walks judges through verifying the full Sentinel Voice pipeline: from
 
 ---
 
+## Before You Test
+
+### Infrastructure is pre-deployed
+
+All AWS services are already running:
+
+- Amazon Connect: `sentinel-voice-demo`
+- Nova 2 Sonic: via Amazon Lex + Bedrock
+- FHIR Server: EC2 t3.small with HAPI FHIR R4
+- 10 Lambda functions deployed
+- 5 DynamoDB tables
+
+### Setup (2 minutes)
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Fill in values from submission package
+
+# 2. Reset demo data
+cd scripts && npm run morning:start
+
+# 3. Start dashboard
+cd dashboard && npm run dev
+# Open http://localhost:3000
+```
+
+### Set your phone number for voice testing
+
+```bash
+# Edit .env:
+TEST_PHONE_NUMBER=+1XXXXXXXXXX
+
+# Place a real call:
+cd scripts && npm run test:real-call
+```
+
+Your phone will ring from `+17208446427`. Answer naturally — Nova 2 Sonic handles the conversation.
+
+### Verify everything is working
+
+```bash
+cd scripts && npm run health:check
+```
+
+All checks should show `✓`. See [Common Issues](#common-issues) if any fail.
+
+---
+
 ## Prerequisites
 
 Before running any tests, ensure:
