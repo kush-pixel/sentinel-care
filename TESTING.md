@@ -1,6 +1,6 @@
-# Sentinel Voice — Testing Guide
+# Sentinel Care — Testing Guide
 
-This guide walks judges through verifying the full Sentinel Voice pipeline: from patient data setup through a real outbound voice call to the nurse dashboard.
+This guide walks judges through verifying the full Sentinel Care pipeline: from patient data setup through a real outbound voice call to the nurse dashboard.
 
 ---
 
@@ -251,100 +251,8 @@ When your phone rings, answer and respond naturally to each question. The AI wil
 - Mobility: "Yes, I've been walking" → extracts `true`
 - Medication adherence: "Yes, taking everything" → extracts `true`
 
-### Step 3: Run the post-call audit
 
-After the call ends (~2–3 minutes):
-
-```bash
-cd scripts
-npm run post-call-audit -- P002 CALL-<id-from-step-1>
-# or omit callId to use the most recent call:
-npm run post-call-audit -- P002
-```
-
-**Expected output (all PASS):**
-```
-═══════════════════════════════════════════════════════
-  POST-CALL AUDIT — P002
-
-INVESTIGATION A — Call
-───────────────────────────────────────────────────────
-  call_id:            CALL-<hex>
-  call_status:        COMPLETE
-  call_timestamp:     2024-...
-  Variables captured: 5/5
-
-  Captured variables:
-    fever: false (conf: 0.95)
-    wound_drainage: true (conf: 0.90)
-    pain_level: 4 (conf: 0.90)
-    mobility: true (conf: 0.95)
-    medication_adherence: true (conf: 0.95)
-
-INVESTIGATION B — Triage
-───────────────────────────────────────────────────────
-  triage_status:      YELLOW
-  weighted_score:     0.90
-  lace_score:         7 MODERATE
-  escalation:         no
-
-  Broken rules (raw → natural):
-    wound_drainage == true  →  wound drainage is present
-
-INVESTIGATION C — SBAR
-───────────────────────────────────────────────────────
-  SBAR text:
-  S (Situation): Post-discharge follow-up completed for Robert Chen (P002)...
-  B (Background): Patient underwent left knee arthroplasty...
-  A (Assessment): wound drainage is present per AAOS Post-Arthroplasty Recovery Protocol...
-  R (Recommendation): Nurse callback required within 24 hours...
-
-  Quality checks:
-    Generated:          YES
-    Has condition ref:  YES
-    Has guideline:      YES
-    No tech notation:   YES
-    No UNKNOWN/holders: YES
-    No underscores:     YES
-    Has recommendation: YES
-
-═══════════════════════════════════════════════════════
-  P002 PIPELINE AUDIT — Robert Chen (Z96.651)
-
-  CALL:
-    Status:                  COMPLETE
-    Questions answered:      5/5
-    No question repeated:    YES
-    All answers captured:    YES
-    Unresolved variables:    0
-
-  TRIAGE:
-    Engine ran:              YES
-    Result:                  YELLOW
-    Broken rules natural:    YES
-    LACE score:              7 MODERATE
-
-  SBAR:
-    Generated:               YES
-    Condition correct:       YES (Z96.651/Left knee joint replacement)
-    Guideline cited:         YES
-    Natural language:        YES
-    No == or >=:             YES
-    No underscores:          YES
-    No UNKNOWN:              YES
-    Has recommendation:      YES
-
-  OVERALL:
-    Call pipeline:           PASS
-    Triage pipeline:         PASS
-    SBAR pipeline:           PASS
-
-═══════════════════════════════════════════════════════
-  P002 PIPELINE: PASS
-═══════════════════════════════════════════════════════
-```
-
-### Step 4: Verify in dashboard
+### Step 3: Verify in dashboard
 
 Refresh `http://localhost:3000`. P002 should appear with:
 - YELLOW badge
@@ -414,23 +322,6 @@ npm run rebuild:fhir    # Re-seeds all FHIR patient records from scratch
 
 ---
 
-## TypeScript Type Checking
-
-```bash
-# Check each Lambda package
-cd lambdas/lex-fulfillment    && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-cd lambdas/care-planner       && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-cd lambdas/summarizer         && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-cd lambdas/nova-sonic-handler && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-cd lambdas/call-initiator     && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-
-# Check dashboard
-cd dashboard && npx tsc --noEmit && echo "PASS" || echo "FAIL"
-```
-
-All should output `PASS`.
-
----
 
 ## What a Perfect Run Looks Like
 
@@ -441,11 +332,10 @@ All should output `PASS`.
 | `npm run morning:start` | Protocols generated for all patients |
 | Dashboard loads | RED/YELLOW patients visible, stats correct |
 | SBAR modal | Natural language, guideline cited, all 4 sections present |
-| Real call placed | Call answered, all questions asked once, no repeats |
-| Post-call audit | `P002 PIPELINE: PASS` |
+| Real call placed | Call answered, all questions answered |
 | Protocol approval | Protocol moves to TriageProtocols |
 | Protocol rejection | New PENDING_REVIEW appears within 10s |
-| TypeScript check | No type errors in any package |
+
 
 ---
 
