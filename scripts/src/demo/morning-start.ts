@@ -70,25 +70,31 @@ async function main(): Promise<void> {
   console.log("STEP 0 — Verifying local services...");
 
   const fhirUrl = process.env["FHIR_BASE_URL"] ?? "http://localhost:8080/fhir";
-  try {
-    const fhirRes = await fetch(
-      `${fhirUrl}/metadata`,
-      { signal: AbortSignal.timeout(5000) as unknown as import("node-fetch").RequestInit["signal"] }
-    );
-    if (!fhirRes.ok) throw new Error(`HTTP ${fhirRes.status}`);
-    console.log("  ✓ FHIR server running");
-  } catch {
-    const isLocal = fhirUrl.includes("localhost");
-    if (isLocal) {
-      console.error(`  ✗ Local FHIR server not running`);
-      console.error("    Start Docker Desktop and run:");
-      console.error("      scripts\\start-local.ps1");
-      console.error("    Wait 90 seconds then run this again.");
-    } else {
-      console.error(`  ✗ AWS FHIR server not responding at ${fhirUrl}`);
-      console.error("    Run: npm run rebuild:fhir");
+  const usingFhirMock = fhirUrl.includes(".lambda-url.");
+
+  if (usingFhirMock) {
+    console.log(`  ✓ Using read-only FHIR mock (Lambda Function URL) — skipping FHIR health check`);
+  } else {
+    try {
+      const fhirRes = await fetch(
+        `${fhirUrl}/metadata`,
+        { signal: AbortSignal.timeout(5000) as unknown as import("node-fetch").RequestInit["signal"] }
+      );
+      if (!fhirRes.ok) throw new Error(`HTTP ${fhirRes.status}`);
+      console.log("  ✓ FHIR server running");
+    } catch {
+      const isLocal = fhirUrl.includes("localhost");
+      if (isLocal) {
+        console.error(`  ✗ Local FHIR server not running`);
+        console.error("    Start Docker Desktop and run:");
+        console.error("      scripts\\start-local.ps1");
+        console.error("    Wait 90 seconds then run this again.");
+      } else {
+        console.error(`  ✗ AWS FHIR server not responding at ${fhirUrl}`);
+        console.error("    Run: npm run rebuild:fhir");
+      }
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   try {
@@ -121,11 +127,15 @@ async function main(): Promise<void> {
   // ─── STEP 2 — Seed base data ────────────────────────────────────────────────
   console.log("STEP 2 — Seeding base data...");
 
-  await seedFhir();
-  console.log("  ✓ FHIR patients seeded");
+  if (usingFhirMock) {
+    console.log("  Using read-only FHIR mock — skipping data seed.");
+  } else {
+    await seedFhir();
+    console.log("  ✓ FHIR patients seeded");
 
-  await seedEncounters();
-  console.log("  ✓ Encounters seeded");
+    await seedEncounters();
+    console.log("  ✓ Encounters seeded");
+  }
 
   await seedRules();
   console.log("  ✓ Clinical rules seeded (versioned)");

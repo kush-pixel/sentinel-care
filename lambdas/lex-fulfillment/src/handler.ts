@@ -21,6 +21,7 @@ import { DynamoDBClient }                              from "@aws-sdk/client-dyn
 import { DynamoDBDocumentClient, GetCommand,
          PutCommand, UpdateCommand }                    from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand }    from "@aws-sdk/client-bedrock-runtime";
+import { LambdaClient, InvokeCommand as LambdaInvoke } from "@aws-sdk/client-lambda";
 import { formatQuestion, QuestionContext }              from "../../nova-sonic-handler/src/question-formatter";
 
 // ─── DynamoDB protocol types ──────────────────────────────────────────────────
@@ -109,6 +110,48 @@ const SUMMARIZER_ARN     = process.env["LAMBDA_ARN_SUMMARIZER"]    ?? "";
 
 const dynamo  = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const bedrock = new BedrockRuntimeClient({ region: REGION });
+
+// ─── FHIR fetch (SDK invocation when Function URL is SCP-blocked) ─────────────
+
+interface FhirResp { ok: boolean; body: unknown }
+
+async function fhirFetchLex(relativePath: string): Promise<FhirResp> {
+  const usingMock = FHIR_BASE_URL.includes(".lambda-url.");
+  if (usingMock) {
+    const qIdx = relativePath.indexOf("?");
+    const rawPath = qIdx >= 0 ? relativePath.slice(0, qIdx) : relativePath;
+    const rawQs   = qIdx >= 0 ? relativePath.slice(qIdx + 1) : "";
+    const queryStringParameters: Record<string, string> = {};
+    for (const pair of rawQs.split("&").filter(Boolean)) {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx > 0) {
+        queryStringParameters[pair.slice(0, eqIdx)] = decodeURIComponent(pair.slice(eqIdx + 1));
+      }
+    }
+    const lc   = new LambdaClient({ region: REGION });
+    const resp = await lc.send(new LambdaInvoke({
+      FunctionName: "sentinel-fhir-mock",
+      Payload: Buffer.from(JSON.stringify({
+        requestContext: { http: { method: "GET" } },
+        rawPath: `/fhir${rawPath}`,
+        queryStringParameters,
+      })),
+    }));
+    const envelope = resp.Payload
+      ? (JSON.parse(Buffer.from(resp.Payload).toString()) as { statusCode?: number; body?: string })
+      : {};
+    const statusCode = envelope.statusCode ?? 500;
+    return { ok: statusCode >= 200 && statusCode < 300, body: JSON.parse(envelope.body ?? "{}") };
+  }
+  if (!FHIR_BASE_URL) return { ok: false, body: {} };
+  try {
+    const res = await fetch(`${FHIR_BASE_URL}${relativePath}`, { signal: AbortSignal.timeout(4_000) });
+    if (!res.ok) return { ok: false, body: {} };
+    return { ok: true, body: await res.json() };
+  } catch {
+    return { ok: false, body: {} };
+  }
+}
 
 // ─── DynamoDB helpers ─────────────────────────────────────────────────────────
 
@@ -299,32 +342,25 @@ async function loadPatientInfo(patientId: string): Promise<PatientInfo> {
 
   try {
     // Parallel FHIR calls — Patient + MedicationRequests + Conditions simultaneously
-    const [patRes, medRes, condRes] = await Promise.all([
-      fetch(`${FHIR_BASE_URL}/Patient/${patientId}`,
-        { signal: AbortSignal.timeout(4_000) }),
-      fetch(`${FHIR_BASE_URL}/MedicationRequest?patient=${patientId}&status=active`,
-        { signal: AbortSignal.timeout(4_000) }),
-      fetch(`${FHIR_BASE_URL}/Condition?patient=${patientId}&_elements=code`,
-        { signal: AbortSignal.timeout(4_000) }),
+    const [patResp, medResp, condResp] = await Promise.all([
+      fhirFetchLex(`/Patient/${patientId}`),
+      fhirFetchLex(`/MedicationRequest?patient=${patientId}&status=active`),
+      fhirFetchLex(`/Condition?patient=${patientId}&_elements=code`),
     ]);
 
-    if (!patRes.ok) return fallback;
+    if (!patResp.ok) return fallback;
 
-    const patient = await patRes.json() as {
-      name?: Array<{ given?: string[]; family?: string }>;
-    };
+    const patient = patResp.body as { name?: Array<{ given?: string[]; family?: string }> };
     const given  = patient.name?.[0]?.given?.[0]  ?? "";
     const family = patient.name?.[0]?.family ?? "";
     const patientName = [given, family].filter(Boolean).join(" ");
 
     const medications: string[] = [];
-    if (medRes.ok) {
-      const bundle = await medRes.json() as {
+    if (medResp.ok) {
+      const bundle = medResp.body as {
         entry?: Array<{
           resource?: {
-            medicationCodeableConcept?: {
-              coding?: Array<{ display?: string }>;
-            };
+            medicationCodeableConcept?: { coding?: Array<{ display?: string }> };
           };
         }>;
       };
@@ -337,8 +373,8 @@ async function loadPatientInfo(patientId: string): Promise<PatientInfo> {
     // Extract primary condition code + display for writing to CallResults
     let conditionCode    = "";
     let conditionDisplay = "";
-    if (condRes.ok) {
-      const condBundle = await condRes.json() as {
+    if (condResp.ok) {
+      const condBundle = condResp.body as {
         entry?: Array<{
           resource?: {
             code?: { coding?: Array<{ code?: string; display?: string }>; text?: string };
@@ -361,12 +397,9 @@ async function loadPatientInfo(patientId: string): Promise<PatientInfo> {
 async function loadMedicationsFromFhir(patientId: string): Promise<string[]> {
   if (!FHIR_BASE_URL) return [];
   try {
-    const res = await fetch(
-      `${FHIR_BASE_URL}/MedicationRequest?patient=${patientId}&status=active`,
-      { signal: AbortSignal.timeout(3_000) },
-    );
-    if (!res.ok) return [];
-    const bundle = await res.json() as {
+    const resp = await fhirFetchLex(`/MedicationRequest?patient=${patientId}&status=active`);
+    if (!resp.ok) return [];
+    const bundle = resp.body as {
       entry?: Array<{
         resource?: {
           medicationCodeableConcept?: { coding?: Array<{ display?: string }> };

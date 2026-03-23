@@ -1,0 +1,13 @@
+{
+  "name": "@sentinel/fhir-mock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Serverless read-only FHIR mock — replaces EC2 HAPI FHIR server for demo/judging",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "typescript": "*"
+  }
+}

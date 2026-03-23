@@ -20,6 +20,9 @@ import {
   UpdateFunctionConfigurationCommand,
   GetFunctionCommand,
   GetFunctionConfigurationCommand,
+  CreateFunctionUrlConfigCommand,
+  GetFunctionUrlConfigCommand,
+  AddPermissionCommand,
 } from "@aws-sdk/client-lambda";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
@@ -34,11 +37,12 @@ const SEP = "──────────────────────�
 // ─── Lambda Definitions ───────────────────────────────────────────────────────
 
 interface LambdaDef {
-  name:     string;
-  dir:      string;
-  envKey:   string;
-  timeout?: number;
-  memory?:  number;
+  name:            string;
+  dir:             string;
+  envKey:          string;
+  timeout?:        number;
+  memory?:         number;
+  withFunctionUrl?: boolean;
 }
 
 const LAMBDAS: LambdaDef[] = [
@@ -52,6 +56,7 @@ const LAMBDAS: LambdaDef[] = [
   { name: "sentinel-triage-engine",    dir: "packages/triage-engine",   envKey: "LAMBDA_ARN_TRIAGE_ENGINE"    },
   { name: "sentinel-call-bridge",     dir: "lambdas/call-bridge",     envKey: "LAMBDA_ARN_CALL_BRIDGE",     timeout: 10, memory: 256 },
   { name: "sentinel-lex-fulfillment", dir: "lambdas/lex-fulfillment", envKey: "LAMBDA_ARN_LEX_FULFILLMENT", timeout: 30, memory: 256 },
+  { name: "sentinel-fhir-mock",       dir: "lambdas/fhir-mock",       envKey: "LAMBDA_ARN_FHIR_MOCK",       timeout: 10, memory: 256, withFunctionUrl: true },
 ];
 
 // ─── Environment Variables ─────────────────────────────────────────────────────
@@ -139,9 +144,44 @@ async function waitForLambdaReady(client: LambdaClient, name: string): Promise<v
   throw new Error(`Timed out waiting for ${name} to become ready`);
 }
 
+// ─── Step 3b: Ensure Function URL exists (AuthType: NONE) ────────────────────
+
+async function ensureFunctionUrl(client: LambdaClient, name: string): Promise<string> {
+  // Check if URL already exists
+  try {
+    const existing = await client.send(new GetFunctionUrlConfigCommand({ FunctionName: name }));
+    if (existing.FunctionUrl) {
+      console.log(`    Function URL already exists: ${existing.FunctionUrl}`);
+      return existing.FunctionUrl;
+    }
+  } catch (err: unknown) {
+    if ((err as { name?: string }).name !== "ResourceNotFoundException") throw err;
+  }
+
+  // Create URL with no auth
+  const created = await client.send(
+    new CreateFunctionUrlConfigCommand({ FunctionName: name, AuthType: "NONE" })
+  );
+
+  // Allow public invocation
+  await client.send(
+    new AddPermissionCommand({
+      FunctionName: name,
+      StatementId:  "AllowPublicFunctionUrl",
+      Action:       "lambda:InvokeFunctionUrl",
+      Principal:    "*",
+      FunctionUrlAuthType: "NONE",
+    })
+  );
+
+  const url = created.FunctionUrl ?? "";
+  console.log(`    Function URL created: ${url}`);
+  return url;
+}
+
 // ─── Step 4: Deploy Lambda ────────────────────────────────────────────────────
 
-async function deployLambda(client: LambdaClient, def: LambdaDef): Promise<string> {
+async function deployLambda(client: LambdaClient, def: LambdaDef): Promise<{ arn: string; functionUrl?: string }> {
   const lambdaDir = path.join(ROOT, def.dir);
 
   // Build
@@ -212,7 +252,13 @@ async function deployLambda(client: LambdaClient, def: LambdaDef): Promise<strin
   console.log(`    Bundle: ${bundleKB} KB → Zip: ${zipKB} KB`);
   console.log(`    ARN:    ${functionArn}`);
 
-  return functionArn;
+  // Optionally attach a public Function URL
+  if (def.withFunctionUrl) {
+    const functionUrl = await ensureFunctionUrl(client, def.name);
+    return { arn: functionArn, functionUrl };
+  }
+
+  return { arn: functionArn };
 }
 
 // ─── Save ARNs to .env ────────────────────────────────────────────────────────
@@ -241,19 +287,25 @@ async function main(): Promise<void> {
   console.log(SEP + "\n");
 
   const client = new LambdaClient({ region: REGION });
-  const results: { def: LambdaDef; arn: string }[] = [];
+  const results: { def: LambdaDef; arn: string; functionUrl?: string }[] = [];
 
   for (const def of LAMBDAS) {
     console.log(`\n[${def.name}]`);
-    const arn = await deployLambda(client, def);
-    results.push({ def, arn });
+    const result = await deployLambda(client, def);
+    results.push({ def, arn: result.arn, ...(result.functionUrl !== undefined ? { functionUrl: result.functionUrl } : {}) });
   }
 
-  // Save ARNs to .env
+  // Save ARNs (and Function URLs) to .env
   console.log("\nSaving ARNs to .env...");
   const arnMap: Record<string, string> = {};
-  for (const { def, arn } of results) {
+  for (const { def, arn, functionUrl } of results) {
     arnMap[def.envKey] = arn;
+    // If a Function URL was created, write it as FHIR_BASE_URL (strip trailing slash + add /fhir suffix)
+    if (functionUrl !== undefined) {
+      const base = functionUrl.replace(/\/$/, "");
+      arnMap["FHIR_BASE_URL"] = `${base}/fhir`;
+      console.log(`  ✓ FHIR_BASE_URL set to Lambda Function URL: ${base}/fhir`);
+    }
   }
   updateEnvFile(arnMap);
   console.log("  ✓ .env updated");
@@ -262,8 +314,11 @@ async function main(): Promise<void> {
   console.log("\n" + SEP);
   console.log("LAMBDA DEPLOYMENT COMPLETE");
   console.log(SEP);
-  for (const { def, arn } of results) {
+  for (const { def, arn, functionUrl } of results) {
     console.log(`  ${def.name.padEnd(29)} ✓ ${arn}`);
+    if (functionUrl !== undefined) {
+      console.log(`  ${"  Function URL:".padEnd(29)}   ${functionUrl}`);
+    }
   }
   console.log(SEP);
   console.log("All ARNs saved to .env automatically");

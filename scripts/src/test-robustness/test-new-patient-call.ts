@@ -17,8 +17,9 @@ import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-const REGION        = process.env["AWS_REGION"]              ?? "us-east-1";
-const FHIR_URL      = process.env["FHIR_BASE_URL"]           ?? "";
+const REGION          = process.env["AWS_REGION"]              ?? "us-east-1";
+const FHIR_URL        = process.env["FHIR_BASE_URL"]           ?? "";
+const USING_MOCK_FHIR = FHIR_URL.includes(".lambda-url.");
 const CONNECT_PHONE = process.env["CONNECT_PHONE_NUMBER"]    ?? "+17208446427";
 const TEST_PHONE    = process.env["TEST_PHONE_NUMBER"]       ?? "";
 const CARE_PLANNER  = process.env["LAMBDA_ARN_CARE_PLANNER"]
@@ -163,7 +164,7 @@ async function main(): Promise<void> {
   console.log("SENTINEL — P008 NEW PATIENT + REAL CALL TEST (I10 HYPERTENSION)");
   console.log(SEP + "\n");
 
-  if (!FHIR_URL) {
+  if (!FHIR_URL && !USING_MOCK_FHIR) {
     console.error("  ✗ FHIR_BASE_URL not set in .env");
     process.exit(1);
   }
@@ -176,22 +177,33 @@ async function main(): Promise<void> {
 
   // ── STEP 1: Create FHIR data ─────────────────────────────────────────────────
   console.log("STEP 1 — Creating P008 FHIR data (I10 Hypertensive crisis)...");
-  try {
-    await createFhirPatient();
-    console.log(`  ✓ Patient P008 (David Chen, DOB 1958-03-22, ${TEST_PHONE})`);
-    await createFhirCondition();
+  if (USING_MOCK_FHIR) {
+    // P008 is pre-seeded in the read-only FHIR mock — no writes needed
+    console.log("  ⓘ Using read-only FHIR mock — P008 data pre-seeded in sentinel-fhir-mock.");
+    console.log(`  ✓ Patient P008 (David Chen, DOB 1958-03-22)`);
     console.log(`  ✓ Condition ${CONDITION.code} — ${CONDITION.display}`);
-    await createFhirEncounter();
-    console.log("  ✓ Encounter: EMERGENCY admission 3 days + 2 prior ED visits");
-    await createFhirMedication();
+    console.log("  ✓ Encounter: EMERGENCY admission 3 days + 2 prior ED visits (static)");
     console.log(`  ✓ Medication: ${MEDICATION}`);
     console.log(`  ✓ Expected LACE: L=${EXPECTED_LACE.l} A=${EXPECTED_LACE.a} C=${EXPECTED_LACE.c} E=${EXPECTED_LACE.e} → ${EXPECTED_LACE.total} ${EXPECTED_LACE.risk}`);
     results["FHIR_CREATE"] = "PASS";
-  } catch (err) {
-    console.error("  ✗ FHIR setup failed:", err instanceof Error ? err.message : String(err));
-    results["FHIR_CREATE"] = "FAIL";
-    printSummary(results);
-    process.exit(1);
+  } else {
+    try {
+      await createFhirPatient();
+      console.log(`  ✓ Patient P008 (David Chen, DOB 1958-03-22, ${TEST_PHONE})`);
+      await createFhirCondition();
+      console.log(`  ✓ Condition ${CONDITION.code} — ${CONDITION.display}`);
+      await createFhirEncounter();
+      console.log("  ✓ Encounter: EMERGENCY admission 3 days + 2 prior ED visits");
+      await createFhirMedication();
+      console.log(`  ✓ Medication: ${MEDICATION}`);
+      console.log(`  ✓ Expected LACE: L=${EXPECTED_LACE.l} A=${EXPECTED_LACE.a} C=${EXPECTED_LACE.c} E=${EXPECTED_LACE.e} → ${EXPECTED_LACE.total} ${EXPECTED_LACE.risk}`);
+      results["FHIR_CREATE"] = "PASS";
+    } catch (err) {
+      console.error("  ✗ FHIR setup failed:", err instanceof Error ? err.message : String(err));
+      results["FHIR_CREATE"] = "FAIL";
+      printSummary(results);
+      process.exit(1);
+    }
   }
 
   // ── STEP 2: Run care-planner ─────────────────────────────────────────────────
@@ -312,28 +324,43 @@ async function main(): Promise<void> {
   // ── STEP 3: Place real outbound call ─────────────────────────────────────────
   console.log("\nSTEP 3 — Placing real outbound call to P008...");
   const callId = `CALL-P008-${Date.now().toString(16)}`;
-  try {
-    const callResult = await invokeLambda(CALL_INIT, {
-      patientId: PATIENT_ID,
-      callId,
-    }) as {
-      statusCode?: number;
-      callId?:     string;
-      status?:     string;
-      error?:      string;
-    };
+  const MAX_CALL_ATTEMPTS = 4;
+  for (let attempt = 1; attempt <= MAX_CALL_ATTEMPTS; attempt++) {
+    try {
+      const callResult = await invokeLambda(CALL_INIT, {
+        patientId: PATIENT_ID,
+        callId,
+        // When using read-only mock FHIR, phone isn't in the FHIR record — pass it directly
+        ...(USING_MOCK_FHIR ? { phoneNumber: TEST_PHONE } : {}),
+      }) as {
+        statusCode?:    number;
+        callId?:        string;
+        status?:        string;
+        error?:         string;
+        connectError?:  string;
+      };
 
-    if (callResult.statusCode === 200 || callResult.status === "INITIATED") {
-      console.log(`  ✓ Call initiated — callId: ${callId}`);
-      results["CALL_INITIATED"] = "PASS";
-    } else {
+      if (callResult.statusCode === 200 || callResult.status === "INITIATED") {
+        console.log(`  ✓ Call initiated — callId: ${callId}`);
+        results["CALL_INITIATED"] = "PASS";
+        break;
+      }
+
+      // LimitExceededException means another call is active — retry after delay
+      if (callResult.connectError === "LimitExceededException" && attempt < MAX_CALL_ATTEMPTS) {
+        console.log(`  ⓘ Connect busy (another call active) — retrying in 15s (attempt ${attempt}/${MAX_CALL_ATTEMPTS})...`);
+        await new Promise((r) => setTimeout(r, 15_000));
+        continue;
+      }
+
       console.error(`  ✗ Call initiator returned ${callResult.statusCode}: ${callResult.error ?? JSON.stringify(callResult)}`);
       results["CALL_INITIATED"] = "FAIL";
+      break;
+    } catch (err) {
+      console.error("  ✗ Call initiator failed:", err instanceof Error ? err.message : String(err));
+      results["CALL_INITIATED"] = "FAIL";
+      break;
     }
-  } catch (err) {
-    console.error("  ✗ Call initiator failed:", err instanceof Error ? err.message : String(err));
-    results["CALL_INITIATED"] = "FAIL";
-    // Continue — always print call details even on failure
   }
 
   // ── Final summary ─────────────────────────────────────────────────────────────

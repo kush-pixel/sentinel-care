@@ -12,14 +12,12 @@ import * as path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-import fetch from "node-fetch";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { calculateLaceScore } from "@sentinel/lace";
 import {
   getFullPatientRecord,
-  FhirBundle,
-  FhirPatient,
+  listPatients,
 } from "../fhir/fhir-client";
 
 function makeDynamo(): DynamoDBDocumentClient {
@@ -30,12 +28,6 @@ function makeDynamo(): DynamoDBDocumentClient {
       : {}),
   });
   return DynamoDBDocumentClient.from(raw);
-}
-
-function fhirBase(): string {
-  const url = process.env["FHIR_BASE_URL"];
-  if (!url) throw new Error("FHIR_BASE_URL is not set");
-  return url;
 }
 
 const SEP = "─────────────────────────────────────────────────────────────────";
@@ -51,12 +43,7 @@ export async function hydrateLace(): Promise<void> {
 
   // ─── STEP 1 — Fetch all patients from FHIR ─────────────────────────────────
   console.log("Step 1 — Fetching all patients from FHIR...");
-  const res = await fetch(`${fhirBase()}/Patient`);
-  if (!res.ok) {
-    throw new Error(`FHIR /Patient fetch failed: ${res.status} ${res.statusText}`);
-  }
-  const bundle = (await res.json()) as FhirBundle<FhirPatient>;
-  const patients = (bundle.entry ?? []).map((e) => e.resource);
+  const patients = await listPatients();
   console.log(`  Found ${patients.length} patient(s) in FHIR\n`);
 
   if (patients.length === 0) {

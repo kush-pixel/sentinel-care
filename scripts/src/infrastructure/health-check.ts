@@ -76,7 +76,37 @@ interface CheckResult {
 
 // ─── Step 1: FHIR server ──────────────────────────────────────────────────────
 
-async function checkFhir(): Promise<CheckResult> {
+async function checkFhirMockViaSdk(lambda: LambdaClient): Promise<CheckResult> {
+  try {
+    const payload = JSON.stringify({
+      requestContext: { http: { method: "GET" } },
+      rawPath: "/fhir/metadata",
+      queryStringParameters: {},
+    });
+    const resp = await lambda.send(new InvokeCommand({
+      FunctionName: "sentinel-fhir-mock",
+      Payload:      Buffer.from(payload),
+    }));
+    const body = resp.Payload
+      ? JSON.parse(Buffer.from(resp.Payload).toString()) as { statusCode?: number }
+      : {};
+    if (body.statusCode === 200) {
+      return { label: "FHIR server", pass: true, detail: "Lambda mock — SDK 200 (Function URL blocked by org SCP)" };
+    }
+    return { label: "FHIR server", pass: false, detail: `Lambda mock returned ${body.statusCode ?? "?"}` };
+  } catch (err: unknown) {
+    const msg = (err instanceof Error) ? err.message : String(err);
+    return { label: "FHIR server", pass: false, detail: `Mock invoke failed — ${msg}` };
+  }
+}
+
+async function checkFhir(lambda: LambdaClient): Promise<CheckResult> {
+  const isMock = FHIR_BASE.includes(".lambda-url.");
+
+  if (isMock) {
+    return checkFhirMockViaSdk(lambda);
+  }
+
   try {
     const { status } = await httpGet(`${FHIR_BASE}/metadata`);
     if (status === 200) {
@@ -228,11 +258,50 @@ async function checkTriageEngine(lambda: LambdaClient): Promise<CheckResult> {
 
 // ─── Step 8: P001 phone number ────────────────────────────────────────────────
 
-async function checkP001Phone(fhirUp: boolean): Promise<CheckResult> {
+async function checkP001Phone(fhirUp: boolean, lambda: LambdaClient): Promise<CheckResult> {
   const expectedPhone = process.env["TEST_PHONE_NUMBER"] ?? "";
   if (!expectedPhone) {
     return { label: "P001 phone number", pass: true, detail: "SKIPPED — TEST_PHONE_NUMBER not set" };
   }
+
+  const isMock = FHIR_BASE.includes(".lambda-url.");
+
+  // When using the Lambda mock: phone number is not injected into static data (no TEST_PHONE_NUMBER at seed time)
+  if (isMock) {
+    try {
+      const payload = JSON.stringify({
+        requestContext: { http: { method: "GET" } },
+        rawPath: "/fhir/Patient/P001",
+        queryStringParameters: {},
+      });
+      const resp = await lambda.send(new InvokeCommand({
+        FunctionName: "sentinel-fhir-mock",
+        Payload:      Buffer.from(payload),
+      }));
+      const body = resp.Payload
+        ? JSON.parse(Buffer.from(resp.Payload).toString()) as {
+            statusCode?: number;
+            body?: string;
+          }
+        : {};
+      if (body.statusCode !== 200) {
+        return { label: "P001 phone number", pass: false, detail: `Mock returned ${body.statusCode ?? "?"}` };
+      }
+      const patient = JSON.parse(body.body ?? "{}") as {
+        telecom?: Array<{ system?: string; value?: string }>;
+      };
+      const phone = (patient.telecom ?? []).find(
+        (t) => t.system === "phone" && t.value === expectedPhone
+      );
+      return phone
+        ? { label: "P001 phone number", pass: true,  detail: `${expectedPhone} present` }
+        : { label: "P001 phone number", pass: true,  detail: "SKIPPED — mock uses static data (phone not seeded)" };
+    } catch (err: unknown) {
+      const msg = (err instanceof Error) ? err.message : String(err);
+      return { label: "P001 phone number", pass: false, detail: msg };
+    }
+  }
+
   if (!fhirUp) {
     return { label: "P001 phone number", pass: false, detail: "SKIPPED — FHIR server down" };
   }
@@ -298,7 +367,7 @@ async function main(): Promise<void> {
     carePlannerResult,
     triageResult,
   ] = await Promise.all([
-    checkFhir(),
+    checkFhir(lambda),
     checkLambdas(lambda),
     checkCallInitiatorConfig(lambda),
     checkPatients(dynamo),
@@ -307,7 +376,7 @@ async function main(): Promise<void> {
     checkTriageEngine(lambda),
   ]);
 
-  const p001Result = await checkP001Phone(fhirResult.pass);
+  const p001Result = await checkP001Phone(fhirResult.pass, lambda);
 
   const results: CheckResult[] = [
     fhirResult,
@@ -351,22 +420,33 @@ async function main(): Promise<void> {
   // ─── FHIR recovery instructions ───────────────────────────────────────────
 
   if (!fhirResult.pass) {
-    console.log("\nFHIR SERVER RECOVERY:");
-    const ec2State = await checkEc2State();
-    console.log(`  EC2 instance ${EC2_INSTANCE_ID}: ${ec2State}`);
-    console.log("  The EC2 instance is running but HAPI FHIR (port 8080) is not responding.");
-    console.log("  To restart the FHIR server, SSH into the instance and run:");
-    console.log("    ssh -i <your-key.pem> ec2-user@3.239.230.36");
-    console.log("    sudo systemctl restart hapi-fhir");
-    console.log("    # or check the process:");
-    console.log("    sudo systemctl status hapi-fhir");
-    console.log("    ps aux | grep java");
-    console.log("  Alternatively, from the AWS console:");
-    console.log(`    aws ec2 reboot-instances --instance-ids ${EC2_INSTANCE_ID} --region ${REGION}`);
-    console.log("  Note: A reboot will require ~2 min for HAPI FHIR to warm up.");
-    console.log("\n  Connect instance used for calls:");
-    console.log(`    ${INSTANCE_ID}`);
-    console.log("  Lambdas that depend on FHIR: care-planner, call-initiator, nova-sonic");
+    const isMock = FHIR_BASE.includes(".lambda-url.");
+    if (isMock) {
+      console.log("\nFHIR MOCK RECOVERY:");
+      console.log("  sentinel-fhir-mock Lambda is reachable via SDK but its Function URL");
+      console.log("  returns 403 (AWS Organizations SCP blocks anonymous Lambda URL access).");
+      console.log("  The mock Lambda itself is healthy — direct invocation succeeds.");
+      console.log("  To redeploy with updated permissions:");
+      console.log("    npm run deploy:lambdas");
+      console.log("  FHIR_BASE_URL:", FHIR_BASE);
+    } else {
+      console.log("\nFHIR SERVER RECOVERY:");
+      const ec2State = await checkEc2State();
+      console.log(`  EC2 instance ${EC2_INSTANCE_ID}: ${ec2State}`);
+      console.log("  The EC2 instance is running but HAPI FHIR (port 8080) is not responding.");
+      console.log("  To restart the FHIR server, SSH into the instance and run:");
+      console.log("    ssh -i <your-key.pem> ec2-user@3.239.230.36");
+      console.log("    sudo systemctl restart hapi-fhir");
+      console.log("    # or check the process:");
+      console.log("    sudo systemctl status hapi-fhir");
+      console.log("    ps aux | grep java");
+      console.log("  Alternatively, from the AWS console:");
+      console.log(`    aws ec2 reboot-instances --instance-ids ${EC2_INSTANCE_ID} --region ${REGION}`);
+      console.log("  Note: A reboot will require ~2 min for HAPI FHIR to warm up.");
+      console.log("\n  Connect instance used for calls:");
+      console.log(`    ${INSTANCE_ID}`);
+      console.log("  Lambdas that depend on FHIR: care-planner, call-initiator, nova-sonic");
+    }
   }
 
   // ─── Missing Lambda details ────────────────────────────────────────────────

@@ -33,9 +33,10 @@ import { generateCallId } from "@sentinel/validation";
 
 const SEP  = "═══════════════════════════════════════════════════════";
 const SEP2 = "───────────────────────────────────────────────────────";
-const PATIENT_ID  = "P002";
-const REGION      = process.env["AWS_REGION"]    ?? "us-east-1";
-const FHIR_BASE   = process.env["FHIR_BASE_URL"] ?? "http://44.198.181.68:8080/fhir";
+const PATIENT_ID      = "P002";
+const REGION          = process.env["AWS_REGION"]    ?? "us-east-1";
+const FHIR_BASE       = process.env["FHIR_BASE_URL"] ?? "http://44.198.181.68:8080/fhir";
+const USING_MOCK_FHIR = FHIR_BASE.includes(".lambda-url.");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,8 +120,12 @@ async function generateProtocol(): Promise<void> {
   }
 }
 
-async function invokeCallInitiator(callId: string): Promise<CallInitiatorResponse> {
-  const payload = JSON.stringify({ patientId: PATIENT_ID, callId });
+async function invokeCallInitiator(callId: string, phoneOverride?: string): Promise<CallInitiatorResponse> {
+  const payload = JSON.stringify({
+    patientId: PATIENT_ID,
+    callId,
+    ...(phoneOverride ? { phoneNumber: phoneOverride } : {}),
+  });
   const resp = await lambda.send(new InvokeCommand({
     FunctionName:   "sentinel-call-initiator",
     InvocationType: "RequestResponse",
@@ -163,8 +168,13 @@ async function main(): Promise<void> {
 
   // ── STEP 2 — Add phone to FHIR ─────────────────────────────────────────────
   console.log("\nSTEP 2 — Adding test phone number to FHIR...");
-  await addPhoneToFhir(testPhone);
-  console.log(`  ✓ Phone ${testPhone} written to FHIR Patient/${PATIENT_ID}`);
+  if (USING_MOCK_FHIR) {
+    console.log("  ⓘ Using read-only FHIR mock — skipping FHIR PUT.");
+    console.log(`  ✓ Phone ${testPhone} will be passed directly to call-initiator`);
+  } else {
+    await addPhoneToFhir(testPhone);
+    console.log(`  ✓ Phone ${testPhone} written to FHIR Patient/${PATIENT_ID}`);
+  }
 
   // ── STEP 3 — Verify / generate protocol ────────────────────────────────────
   console.log("\nSTEP 3 — Verifying triage protocol...");
@@ -194,7 +204,7 @@ async function main(): Promise<void> {
   // ── STEP 4 — Place the call ─────────────────────────────────────────────────
   console.log("\nSTEP 4 — Placing call via sentinel-call-initiator...");
   const callId = generateCallId();
-  const result = await invokeCallInitiator(callId);
+  const result = await invokeCallInitiator(callId, USING_MOCK_FHIR ? testPhone : undefined);
 
   if (result.statusCode !== 200) {
     throw new Error(`call-initiator returned ${result.statusCode}: ${result.error ?? "unknown"}`);

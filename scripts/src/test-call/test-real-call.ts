@@ -25,6 +25,9 @@ const REGION      = process.env["AWS_REGION"]    ?? "us-east-1";
 const PATIENT_ID  = "P001";
 const LAMBDA_NAME = "sentinel-call-initiator";
 
+// True when FHIR is the read-only Lambda mock (SCP blocks direct HTTP)
+const USING_MOCK_FHIR = FHIR_BASE.includes(".lambda-url.");
+
 // ─── FHIR types ───────────────────────────────────────────────────────────────
 
 interface FhirTelecom {
@@ -40,7 +43,7 @@ interface FhirPatient {
   [key: string]: unknown;
 }
 
-// ─── Step 1: Upsert test phone number on P001 ─────────────────────────────────
+// ─── Step 1: Upsert test phone number on P001 (real FHIR only) ───────────────
 
 async function addPhoneToPatient(phoneNumber: string): Promise<void> {
   // GET existing resource
@@ -75,17 +78,26 @@ async function addPhoneToPatient(phoneNumber: string): Promise<void> {
 // ─── Step 2: Invoke call-initiator Lambda ────────────────────────────────────
 
 interface CallInitiatorResponse {
-  statusCode: number;
-  contactId?: string;
-  callId?:    string;
-  patientId?: string;
-  status?:    string;
-  error?:     string;
+  statusCode:    number;
+  contactId?:    string;
+  callId?:       string;
+  patientId?:    string;
+  status?:       string;
+  error?:        string;
+  connectError?: string;
 }
 
-async function invokeCallInitiator(callId: string): Promise<CallInitiatorResponse> {
+async function invokeCallInitiator(
+  callId: string,
+  phoneOverride?: string
+): Promise<CallInitiatorResponse> {
   const client  = new LambdaClient({ region: REGION });
-  const payload = JSON.stringify({ patientId: PATIENT_ID, callId });
+  const payload = JSON.stringify({
+    patientId: PATIENT_ID,
+    callId,
+    // Pass phoneNumber directly when using mock FHIR (read-only, no PUT support)
+    ...(phoneOverride ? { phoneNumber: phoneOverride } : {}),
+  });
 
   const resp = await client.send(new InvokeCommand({
     FunctionName:   LAMBDA_NAME,
@@ -127,17 +139,28 @@ async function main(): Promise<void> {
   console.log(`  Phone:    ${testPhone}`);
   console.log(`  Call ID:  ${callId}\n`);
 
-  // Step 1 — Add phone to FHIR
+  // Step 1 — Add phone to FHIR (skipped for read-only mock)
   console.log("STEP 1 — Adding test phone number to P001 FHIR record...");
-  await addPhoneToPatient(testPhone);
-  console.log(`  ✓ PUT /fhir/Patient/${PATIENT_ID} with telecom phone=${testPhone}`);
+  if (USING_MOCK_FHIR) {
+    console.log("  ⓘ Using read-only FHIR mock — skipping FHIR PUT.");
+    console.log(`  ✓ Phone ${testPhone} will be passed directly to call-initiator`);
+  } else {
+    await addPhoneToPatient(testPhone);
+    console.log(`  ✓ PUT /fhir/Patient/${PATIENT_ID} with telecom phone=${testPhone}`);
+  }
 
   // Step 2 — Invoke call-initiator
   console.log("\nSTEP 2 — Invoking sentinel-call-initiator Lambda...");
-  const result = await invokeCallInitiator(callId);
+  const result = await invokeCallInitiator(callId, USING_MOCK_FHIR ? testPhone : undefined);
 
   if (result.statusCode !== 200) {
-    throw new Error(`call-initiator returned ${result.statusCode}: ${result.error ?? "unknown error"}`);
+    const hint = result.connectError === "LimitExceededException"
+      ? " — a call is already active in Connect; wait for it to complete then retry"
+      : "";
+    throw new Error(
+      `call-initiator returned ${result.statusCode}: ${result.error ?? "unknown error"}` +
+      (result.connectError ? ` (${result.connectError}${hint})` : "")
+    );
   }
 
   console.log(`  ✓ Lambda responded: statusCode=${result.statusCode}`);

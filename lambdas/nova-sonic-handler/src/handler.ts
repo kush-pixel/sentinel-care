@@ -22,6 +22,7 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import fetch from "node-fetch";
+import { LambdaClient, InvokeCommand as LambdaInvoke } from "@aws-sdk/client-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -99,7 +100,37 @@ function fhirBase(): string {
 
 async function fhirGet<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${fhirBase()}${path}`);
+    const base = fhirBase();
+    if (base.includes(".lambda-url.")) {
+      // SCP blocks anonymous Function URL calls — invoke mock directly via SDK
+      const qIdx   = path.indexOf("?");
+      const rawPath = qIdx >= 0 ? path.slice(0, qIdx) : path;
+      const rawQs   = qIdx >= 0 ? path.slice(qIdx + 1) : "";
+      const queryStringParameters: Record<string, string> = {};
+      for (const pair of rawQs.split("&").filter(Boolean)) {
+        const eqIdx = pair.indexOf("=");
+        if (eqIdx > 0) {
+          queryStringParameters[pair.slice(0, eqIdx)] = decodeURIComponent(pair.slice(eqIdx + 1));
+        }
+      }
+      const lc   = new LambdaClient({ region: process.env["AWS_REGION"] ?? "us-east-1" });
+      const resp = await lc.send(new LambdaInvoke({
+        FunctionName: "sentinel-fhir-mock",
+        Payload: Buffer.from(JSON.stringify({
+          requestContext: { http: { method: "GET" } },
+          rawPath: `/fhir${rawPath}`,
+          queryStringParameters,
+        })),
+      }));
+      const envelope = resp.Payload
+        ? (JSON.parse(Buffer.from(resp.Payload).toString()) as { statusCode?: number; body?: string })
+        : {};
+      if ((envelope.statusCode ?? 500) < 300) {
+        return JSON.parse(envelope.body ?? "null") as T;
+      }
+      return null;
+    }
+    const res = await fetch(`${base}${path}`);
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
